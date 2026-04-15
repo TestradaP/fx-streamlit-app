@@ -17,6 +17,7 @@ TRM_API_DATASETS = [
     "dit9-nnvp",  # TRM desde enero 2022
 ]
 DATOS_GOV_BASE = "https://www.datos.gov.co/resource"
+SPREAD_POR_DEFECTO = 0.02
 
 
 # =========================
@@ -40,7 +41,6 @@ def validar_columnas_facturas(df: pd.DataFrame) -> None:
         "fecha_factura",
         "moneda",
         "valor_usd",
-        "saldo_usd",
     }
     faltantes = columnas_requeridas - set(df.columns)
     if faltantes:
@@ -50,7 +50,7 @@ def validar_columnas_facturas(df: pd.DataFrame) -> None:
 
 
 def validar_columnas_monetizaciones(df: pd.DataFrame) -> None:
-    columnas_requeridas = {"fecha", "factura", "monto_usd"}
+    columnas_requeridas = {"fecha", "factura", "monto_usd", "tasa_monetizacion"}
     faltantes = columnas_requeridas - set(df.columns)
     if faltantes:
         raise ValueError(
@@ -66,29 +66,26 @@ def cargar_facturas(archivo) -> pd.DataFrame:
     if df["fecha_factura"].isna().any():
         raise ValueError("Hay fechas inválidas en 'fecha_factura'.")
 
-    for col in ["valor_usd", "saldo_usd"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    if df[["valor_usd", "saldo_usd"]].isna().any().any():
-        raise ValueError(
-            "Hay valores no numéricos o vacíos en 'valor_usd' o 'saldo_usd'."
-        )
+    df["valor_usd"] = pd.to_numeric(df["valor_usd"], errors="coerce")
+    if df["valor_usd"].isna().any():
+        raise ValueError("Hay valores inválidos en 'valor_usd'.")
 
     df = df.copy()
     df["moneda"] = df["moneda"].astype(str).str.upper().str.strip()
     df["factura"] = df["factura"].astype(str).str.strip()
+    df["cliente"] = df["cliente"].astype(str).str.strip()
 
-    df = df[(df["moneda"] == "USD") & (df["saldo_usd"] > 0)].copy()
+    df = df[(df["moneda"] == "USD") & (df["valor_usd"] > 0)].copy()
 
     if df.empty:
-        raise ValueError("No quedaron facturas activas en USD con saldo_usd > 0.")
+        raise ValueError("No quedaron facturas activas en USD con valor_usd > 0.")
 
-    return df
+    return df.reset_index(drop=True)
 
 
 def cargar_monetizaciones(archivo) -> pd.DataFrame:
     if archivo is None:
-        return pd.DataFrame(columns=["fecha", "factura", "monto_usd"])
+        return pd.DataFrame(columns=["fecha", "factura", "monto_usd", "tasa_monetizacion"])
 
     df = pd.read_excel(archivo)
     validar_columnas_monetizaciones(df)
@@ -99,12 +96,16 @@ def cargar_monetizaciones(archivo) -> pd.DataFrame:
 
     df["factura"] = df["factura"].astype(str).str.strip()
     df["monto_usd"] = pd.to_numeric(df["monto_usd"], errors="coerce")
+    df["tasa_monetizacion"] = pd.to_numeric(df["tasa_monetizacion"], errors="coerce")
 
     if df["monto_usd"].isna().any():
-        raise ValueError("Hay valores inválidos en 'monto_usd' de monetizaciones.xlsx.")
-
+        raise ValueError("Hay valores inválidos en 'monto_usd'.")
+    if df["tasa_monetizacion"].isna().any():
+        raise ValueError("Hay valores inválidos en 'tasa_monetizacion'.")
     if (df["monto_usd"] < 0).any():
         raise ValueError("No se permiten monetizaciones negativas.")
+    if (df["tasa_monetizacion"] <= 0).any():
+        raise ValueError("No se permiten tasas de monetización <= 0.")
 
     return df.sort_values(["factura", "fecha"]).reset_index(drop=True)
 
@@ -234,7 +235,7 @@ def descargar_trm_desde_datos_abiertos(
     return df_expandido
 
 
-def asignar_trm_inicial_automatica(
+def asignar_trm_factura(
     df_facturas: pd.DataFrame,
     df_trm: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -244,12 +245,18 @@ def asignar_trm_inicial_automatica(
     facturas["fecha_factura_norm"] = pd.to_datetime(facturas["fecha_factura"]).dt.normalize()
     trm["fecha"] = pd.to_datetime(trm["fecha"]).dt.normalize()
 
-    facturas = facturas.sort_values("fecha_factura_norm")
-    trm = trm.sort_values("fecha")
+    trm = (
+        trm[["fecha", "trm"]]
+        .drop_duplicates(subset=["fecha"], keep="last")
+        .sort_values("fecha")
+        .reset_index(drop=True)
+    )
+
+    facturas = facturas.sort_values("fecha_factura_norm").reset_index(drop=True)
 
     facturas = pd.merge_asof(
         facturas,
-        trm[["fecha", "trm"]],
+        trm,
         left_on="fecha_factura_norm",
         right_on="fecha",
         direction="backward",
@@ -258,11 +265,11 @@ def asignar_trm_inicial_automatica(
     if facturas["trm"].isna().any():
         faltantes = facturas.loc[facturas["trm"].isna(), ["factura", "fecha_factura"]]
         raise ValueError(
-            "No fue posible asignar TRM inicial a algunas facturas:\n"
+            "No fue posible asignar TRM factura a algunas facturas:\n"
             f"{faltantes}"
         )
 
-    facturas = facturas.rename(columns={"trm": "trm_inicial"})
+    facturas = facturas.rename(columns={"trm": "trm_factura"})
     facturas = facturas.drop(columns=["fecha", "fecha_factura_norm"])
 
     return facturas
@@ -272,7 +279,8 @@ def asignar_trm_inicial_automatica(
 # CÁLCULOS
 # =========================
 def validar_monetizaciones_vs_facturas(
-    df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame
+    df_facturas: pd.DataFrame,
+    df_monetizaciones: pd.DataFrame
 ) -> pd.DataFrame:
     if df_monetizaciones.empty:
         return pd.DataFrame()
@@ -290,71 +298,116 @@ def validar_monetizaciones_vs_facturas(
         df_monetizaciones.groupby("factura", as_index=False)["monto_usd"].sum()
     )
 
-    base = df_facturas[["factura", "valor_usd", "saldo_usd"]].copy()
-    control = base.merge(monet_por_factura, on="factura", how="left").fillna(0)
+    control = df_facturas[["factura", "valor_usd"]].merge(
+        monet_por_factura, on="factura", how="left"
+    ).fillna(0)
 
-    excedidas = control[control["monto_usd"] > control["valor_usd"]]
+    control["saldo_vivo_calculado"] = control["valor_usd"] - control["monto_usd"]
+
+    excedidas = control[control["saldo_vivo_calculado"] < -1e-9]
     if not excedidas.empty:
         raise ValueError(
             "Hay facturas donde la monetización total supera el valor_usd original:\n"
-            f"{excedidas[['factura', 'valor_usd', 'monto_usd']]}"
+            f"{excedidas[['factura', 'valor_usd', 'monto_usd', 'saldo_vivo_calculado']]}"
         )
 
-    control["saldo_esperado"] = control["valor_usd"] - control["monto_usd"]
-    control["diferencia_vs_saldo_actual"] = control["saldo_esperado"] - control["saldo_usd"]
+    control["saldo_vivo_calculado"] = control["saldo_vivo_calculado"].clip(lower=0)
 
     return control
+
+
+def separar_monetizaciones_factura(
+    fila_factura: pd.Series,
+    df_monetizaciones: pd.DataFrame,
+):
+    factura = str(fila_factura["factura"]).strip()
+    fecha_factura = pd.to_datetime(fila_factura["fecha_factura"]).normalize()
+
+    monet = df_monetizaciones[df_monetizaciones["factura"] == factura].copy()
+
+    if monet.empty:
+        anticipos = monet.copy()
+        post = monet.copy()
+    else:
+        monet["fecha"] = pd.to_datetime(monet["fecha"]).dt.normalize()
+        anticipos = monet[monet["fecha"] < fecha_factura].copy()
+        post = monet[monet["fecha"] >= fecha_factura].copy()
+
+    return anticipos, post
 
 
 def calcular_resumen_actual(
     df_facturas: pd.DataFrame,
     df_monetizaciones: pd.DataFrame,
     trm_actual: float,
+    trm_ayer: float,
+    spread: float,
 ) -> pd.DataFrame:
-    monet_por_factura = (
-        df_monetizaciones.groupby("factura", as_index=False)["monto_usd"].sum()
-        if not df_monetizaciones.empty
-        else pd.DataFrame(columns=["factura", "monto_usd"])
-    )
+    registros = []
 
-    anticipos_previos = pd.DataFrame(columns=["factura", "anticipo_previo_total_usd"])
-    if not df_monetizaciones.empty:
-        tmp = df_monetizaciones.merge(
-            df_facturas[["factura", "fecha_factura"]],
-            on="factura",
-            how="left",
+    for _, fila in df_facturas.iterrows():
+        factura = fila["factura"]
+        cliente = fila["cliente"]
+        fecha_factura = pd.to_datetime(fila["fecha_factura"]).normalize()
+        valor_usd = float(fila["valor_usd"])
+        trm_factura = float(fila["trm_factura"])
+
+        anticipos, post = separar_monetizaciones_factura(fila, df_monetizaciones)
+
+        anticipo_previo_total_usd = float(anticipos["monto_usd"].sum()) if not anticipos.empty else 0.0
+        abonos_post_factura_total_usd = float(post["monto_usd"].sum()) if not post.empty else 0.0
+
+        saldo_vivo_actual_usd = max(valor_usd - anticipo_previo_total_usd - abonos_post_factura_total_usd, 0.0)
+
+        # Diferencia realizada por anticipos:
+        # se compara TRM factura vs tasa de monetización del anticipo
+        dif_anticipos = 0.0
+        if not anticipos.empty:
+            dif_anticipos = float(
+                ((trm_factura - anticipos["tasa_monetizacion"]) * anticipos["monto_usd"]).sum()
+            )
+
+        # Diferencia realizada post-factura:
+        # se compara tasa de monetización vs TRM factura
+        dif_realizada_post = 0.0
+        if not post.empty:
+            dif_realizada_post = float(
+                ((post["tasa_monetizacion"] - trm_factura) * post["monto_usd"]).sum()
+            )
+
+        # Diferencia no realizada:
+        dif_no_realizada = saldo_vivo_actual_usd * (trm_actual - trm_factura)
+
+        # Diferencia del día y escenarios
+        dif_dia_base = saldo_vivo_actual_usd * (trm_actual - trm_ayer)
+        trm_plus = trm_actual * (1 + spread)
+        trm_minus = trm_actual * (1 - spread)
+        dif_dia_plus = saldo_vivo_actual_usd * (trm_plus - trm_ayer)
+        dif_dia_minus = saldo_vivo_actual_usd * (trm_minus - trm_ayer)
+
+        dif_total = dif_anticipos + dif_realizada_post + dif_no_realizada
+
+        registros.append(
+            {
+                "factura": factura,
+                "cliente": cliente,
+                "fecha_factura": fecha_factura,
+                "valor_usd": valor_usd,
+                "trm_factura": trm_factura,
+                "anticipo_previo_total_usd": anticipo_previo_total_usd,
+                "abonos_post_factura_total_usd": abonos_post_factura_total_usd,
+                "saldo_vivo_actual_usd": saldo_vivo_actual_usd,
+                "dif_anticipos": dif_anticipos,
+                "dif_realizada_post": dif_realizada_post,
+                "dif_no_realizada": dif_no_realizada,
+                "dif_total": dif_total,
+                "dif_dia_base": dif_dia_base,
+                "dif_dia_plus_2pct": dif_dia_plus,
+                "dif_dia_minus_2pct": dif_dia_minus,
+            }
         )
-        anticipos_previos = (
-            tmp[tmp["fecha"] < tmp["fecha_factura"]]
-            .groupby("factura", as_index=False)["monto_usd"]
-            .sum()
-            .rename(columns={"monto_usd": "anticipo_previo_total_usd"})
-        )
 
-    detalle = df_facturas.copy().merge(
-        monet_por_factura.rename(columns={"monto_usd": "monetizado_usd"}),
-        on="factura",
-        how="left",
-    )
-    detalle = detalle.merge(
-        anticipos_previos,
-        on="factura",
-        how="left",
-    )
-
-    detalle["monetizado_usd"] = detalle["monetizado_usd"].fillna(0.0)
-    detalle["anticipo_previo_total_usd"] = detalle["anticipo_previo_total_usd"].fillna(0.0)
-
-    # saldo_usd ya representa el saldo actual pendiente
-    detalle["saldo_vivo_actual_usd"] = detalle["saldo_usd"]
-
-    detalle["valor_inicial_cop"] = detalle["saldo_vivo_actual_usd"] * detalle["trm_inicial"]
-    detalle["valor_actual_cop"] = detalle["saldo_vivo_actual_usd"] * trm_actual
-    detalle["diferencia_cambio_acumulada"] = (
-        detalle["valor_actual_cop"] - detalle["valor_inicial_cop"]
-    )
-
-    return detalle
+    return pd.DataFrame(registros)
 
 
 def construir_saldos_diarios(
@@ -373,48 +426,67 @@ def construir_saldos_diarios(
         factura = fila["factura"]
         fecha_factura = pd.to_datetime(fila["fecha_factura"]).normalize()
         valor_usd = float(fila["valor_usd"])
-        trm_inicial = float(fila["trm_inicial"])
+        trm_factura = float(fila["trm_factura"])
         cliente = fila["cliente"]
 
         monet_fact = monetizaciones_por_factura.get(
             factura,
-            pd.DataFrame(columns=["fecha", "factura", "monto_usd"])
+            pd.DataFrame(columns=["fecha", "factura", "monto_usd", "tasa_monetizacion"])
         ).copy()
 
         if not monet_fact.empty:
             monet_fact["fecha"] = pd.to_datetime(monet_fact["fecha"]).dt.normalize()
 
-        anticipo_previo = 0.0
-        if not monet_fact.empty:
-            anticipo_previo = monet_fact.loc[
-                monet_fact["fecha"] < fecha_factura, "monto_usd"
-            ].sum()
+        anticipos = monet_fact[monet_fact["fecha"] < fecha_factura].copy() if not monet_fact.empty else monet_fact.copy()
+        post = monet_fact[monet_fact["fecha"] >= fecha_factura].copy() if not monet_fact.empty else monet_fact.copy()
+
+        anticipo_previo_usd = float(anticipos["monto_usd"].sum()) if not anticipos.empty else 0.0
+        dif_anticipos = 0.0
+        if not anticipos.empty:
+            dif_anticipos = float(
+                ((trm_factura - anticipos["tasa_monetizacion"]) * anticipos["monto_usd"]).sum()
+            )
 
         for fecha in fechas:
             if fecha < fecha_factura:
                 saldo_vivo = 0.0
-                anticipo_aplicado = anticipo_previo
-                abonos_post_factura = 0.0
+                abonos_post_factura_usd = 0.0
+                dif_realizada_post = 0.0
+                dif_no_realizada = 0.0
+                dif_total = 0.0
             else:
-                abonos_post_factura = 0.0
-                if not monet_fact.empty:
-                    abonos_post_factura = monet_fact.loc[
-                        (monet_fact["fecha"] >= fecha_factura) & (monet_fact["fecha"] <= fecha),
-                        "monto_usd"
-                    ].sum()
+                if not post.empty:
+                    post_hasta_fecha = post[post["fecha"] <= fecha].copy()
+                else:
+                    post_hasta_fecha = post.copy()
 
-                saldo_vivo = max(valor_usd - anticipo_previo - abonos_post_factura, 0.0)
-                anticipo_aplicado = anticipo_previo
+                abonos_post_factura_usd = float(post_hasta_fecha["monto_usd"].sum()) if not post_hasta_fecha.empty else 0.0
+
+                dif_realizada_post = 0.0
+                if not post_hasta_fecha.empty:
+                    dif_realizada_post = float(
+                        ((post_hasta_fecha["tasa_monetizacion"] - trm_factura) * post_hasta_fecha["monto_usd"]).sum()
+                    )
+
+                saldo_vivo = max(valor_usd - anticipo_previo_usd - abonos_post_factura_usd, 0.0)
+                trm_del_dia = float(fechas_trm_map.loc[fecha]) if fecha in fechas_trm_map.index else None
+                dif_no_realizada = saldo_vivo * (trm_del_dia - trm_factura) if trm_del_dia is not None else 0.0
+                dif_total = dif_anticipos + dif_realizada_post + dif_no_realizada
 
             registros.append(
                 {
                     "fecha": fecha,
                     "factura": factura,
                     "cliente": cliente,
+                    "valor_usd": valor_usd,
+                    "trm_factura": trm_factura,
+                    "anticipo_previo_usd": anticipo_previo_usd,
+                    "abonos_post_factura_usd": abonos_post_factura_usd,
                     "saldo_vivo_usd": saldo_vivo,
-                    "anticipo_previo_usd": anticipo_aplicado,
-                    "abonos_post_factura_usd": abonos_post_factura,
-                    "trm_inicial": trm_inicial,
+                    "dif_anticipos": dif_anticipos if fecha >= fecha_factura else 0.0,
+                    "dif_realizada_post": dif_realizada_post,
+                    "dif_no_realizada": dif_no_realizada,
+                    "dif_total": dif_total,
                 }
             )
 
@@ -426,35 +498,33 @@ def construir_serie_total(
     df_monetizaciones: pd.DataFrame,
     df_trm: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    global fechas_trm_map
+    fechas_trm_map = (
+        df_trm[["fecha", "trm"]]
+        .drop_duplicates(subset=["fecha"], keep="last")
+        .set_index("fecha")["trm"]
+    )
+
     fechas = df_trm["fecha"].sort_values().reset_index(drop=True)
     detalle_diario = construir_saldos_diarios(df_facturas, df_monetizaciones, fechas)
     detalle_diario = detalle_diario.merge(df_trm, on="fecha", how="left")
-
-    detalle_diario["valor_diario_cop"] = (
-        detalle_diario["saldo_vivo_usd"] * detalle_diario["trm"]
-    )
-    detalle_diario["valor_base_cop"] = (
-        detalle_diario["saldo_vivo_usd"] * detalle_diario["trm_inicial"]
-    )
-    detalle_diario["diferencia_cambio_diaria_factura"] = (
-        detalle_diario["valor_diario_cop"] - detalle_diario["valor_base_cop"]
-    )
 
     serie_total = (
         detalle_diario.groupby("fecha", as_index=False)
         .agg(
             trm=("trm", "first"),
             saldo_total_usd=("saldo_vivo_usd", "sum"),
-            valor_total_cop=("valor_diario_cop", "sum"),
-            valor_base_total_cop=("valor_base_cop", "sum"),
-            diferencia_cambio_total=("diferencia_cambio_diaria_factura", "sum"),
+            dif_anticipos_total=("dif_anticipos", "sum"),
+            dif_realizada_post_total=("dif_realizada_post", "sum"),
+            dif_no_realizada_total=("dif_no_realizada", "sum"),
+            dif_total=("dif_total", "sum"),
         )
         .sort_values("fecha")
         .reset_index(drop=True)
     )
 
+    serie_total["dif_dia_base"] = serie_total["dif_no_realizada_total"].diff().fillna(0)
     serie_total["variacion_diaria_trm"] = serie_total["trm"].diff()
-    serie_total["diferencia_cambio_diaria_aprox"] = serie_total["diferencia_cambio_total"].diff()
 
     return serie_total, detalle_diario
 
@@ -465,58 +535,23 @@ def construir_serie_factura(
     df_trm: pd.DataFrame,
 ) -> pd.DataFrame:
     factura = str(fila_factura["factura"]).strip()
-    cliente = fila_factura["cliente"]
-    fecha_factura = pd.to_datetime(fila_factura["fecha_factura"]).normalize()
-    valor_usd = float(fila_factura["valor_usd"])
-    trm_inicial = float(fila_factura["trm_inicial"])
+    df_facturas_una = pd.DataFrame([fila_factura])
+    detalle, _ = construir_serie_total(df_facturas_una, df_monetizaciones, df_trm)
 
-    monet_fact = df_monetizaciones[df_monetizaciones["factura"] == factura].copy()
-    if not monet_fact.empty:
-        monet_fact["fecha"] = pd.to_datetime(monet_fact["fecha"]).dt.normalize()
-        monet_fact = monet_fact.sort_values("fecha")
-
-    anticipo_previo = 0.0
-    if not monet_fact.empty:
-        anticipo_previo = monet_fact.loc[
-            monet_fact["fecha"] < fecha_factura, "monto_usd"
-        ].sum()
+    # reconstrucción detallada
+    global fechas_trm_map
+    fechas_trm_map = (
+        df_trm[["fecha", "trm"]]
+        .drop_duplicates(subset=["fecha"], keep="last")
+        .set_index("fecha")["trm"]
+    )
 
     fechas = df_trm["fecha"].sort_values().reset_index(drop=True)
-    registros = []
+    detalle_diario = construir_saldos_diarios(df_facturas_una, df_monetizaciones, fechas)
+    detalle_diario = detalle_diario.merge(df_trm, on="fecha", how="left")
 
-    for fecha in fechas:
-        if fecha < fecha_factura:
-            saldo_vivo = 0.0
-            abonos_post_factura = 0.0
-        else:
-            abonos_post_factura = 0.0
-            if not monet_fact.empty:
-                abonos_post_factura = monet_fact.loc[
-                    (monet_fact["fecha"] >= fecha_factura) & (monet_fact["fecha"] <= fecha),
-                    "monto_usd"
-                ].sum()
-
-            saldo_vivo = max(valor_usd - anticipo_previo - abonos_post_factura, 0.0)
-
-        registros.append(
-            {
-                "fecha": fecha,
-                "factura": factura,
-                "cliente": cliente,
-                "saldo_vivo_usd": saldo_vivo,
-                "anticipo_previo_usd": anticipo_previo,
-                "abonos_post_factura_usd": abonos_post_factura,
-                "trm_inicial": trm_inicial,
-            }
-        )
-
-    serie_factura = pd.DataFrame(registros).merge(df_trm, on="fecha", how="left")
-    serie_factura["valor_cop"] = serie_factura["saldo_vivo_usd"] * serie_factura["trm"]
-    serie_factura["valor_base_cop"] = serie_factura["saldo_vivo_usd"] * serie_factura["trm_inicial"]
-    serie_factura["diferencia_cambio_acumulada"] = (
-        serie_factura["valor_cop"] - serie_factura["valor_base_cop"]
-    )
-    serie_factura["diferencia_cambio_dia"] = serie_factura["diferencia_cambio_acumulada"].diff()
+    serie_factura = detalle_diario[detalle_diario["factura"] == factura].copy()
+    serie_factura["dif_dia_base"] = serie_factura["dif_no_realizada"].diff().fillna(0)
 
     return serie_factura
 
@@ -555,19 +590,19 @@ def fig_trm(serie_total: pd.DataFrame):
     return fig
 
 
-def fig_valor_cartera(serie_total: pd.DataFrame):
+def fig_saldo_vivo(serie_total: pd.DataFrame):
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(serie_total["fecha"], serie_total["valor_total_cop"], linewidth=2)
-    ax.set_title("Valor total de la cartera en COP")
+    ax.plot(serie_total["fecha"], serie_total["saldo_total_usd"], linewidth=2)
+    ax.set_title("Saldo vivo total en USD")
     ax.set_xlabel("Fecha")
-    ax.set_ylabel("Valor total cartera (COP)")
+    ax.set_ylabel("USD")
     ax.grid(True, alpha=0.3)
     ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
     fig.tight_layout()
     return fig
 
 
-def fig_trm_y_diferencia_cambio(
+def fig_trm_y_diferencia_total(
     serie_total: pd.DataFrame,
     diferencia_total_actual: float,
 ):
@@ -589,8 +624,8 @@ def fig_trm_y_diferencia_cambio(
     ax2 = ax1.twinx()
     linea2 = ax2.plot(
         serie_total["fecha"],
-        serie_total["diferencia_cambio_total"],
-        label="Diferencia en cambio total",
+        serie_total["dif_total"],
+        label="Diferencia total",
         linestyle="--",
         linewidth=2.5,
         color="tab:red",
@@ -598,26 +633,7 @@ def fig_trm_y_diferencia_cambio(
     )
 
     ax2.axhline(y=0, linestyle=":", linewidth=1.5, color="black", alpha=0.8)
-    ax2.fill_between(
-        serie_total["fecha"],
-        serie_total["diferencia_cambio_total"],
-        0,
-        where=serie_total["diferencia_cambio_total"] >= 0,
-        alpha=0.12,
-        color="tab:green",
-        interpolate=True,
-    )
-    ax2.fill_between(
-        serie_total["fecha"],
-        serie_total["diferencia_cambio_total"],
-        0,
-        where=serie_total["diferencia_cambio_total"] < 0,
-        alpha=0.12,
-        color="tab:red",
-        interpolate=True,
-    )
-
-    ax2.set_ylabel("Diferencia en cambio total (COP)", color="tab:red")
+    ax2.set_ylabel("Diferencia total (COP)", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
 
@@ -627,7 +643,7 @@ def fig_trm_y_diferencia_cambio(
     etiquetas = [linea.get_label() for linea in lineas]
     ax1.legend(lineas, etiquetas, loc="upper left")
 
-    texto_resumen = f"Diferencia en cambio total al día: ${diferencia_total_actual:,.2f}"
+    texto_resumen = f"Diferencia total al día: ${diferencia_total_actual:,.2f}"
     fig.text(
         0.5,
         0.02,
@@ -642,15 +658,15 @@ def fig_trm_y_diferencia_cambio(
     return fig
 
 
-def fig_pnl_cambiario(serie_total: pd.DataFrame):
+def fig_pnl_dia(serie_total: pd.DataFrame):
     fig, ax = plt.subplots(figsize=(15, 6))
     ax.bar(
         serie_total["fecha"],
-        serie_total["diferencia_cambio_diaria_aprox"].fillna(0),
+        serie_total["dif_dia_base"].fillna(0),
         width=1.0,
     )
     ax.axhline(0, color="black", linewidth=1)
-    ax.set_title("P&L diario por diferencia en cambio")
+    ax.set_title("Diferencia del día sobre saldo vivo")
     ax.set_xlabel("Fecha")
     ax.set_ylabel("COP")
     ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
@@ -662,8 +678,8 @@ def fig_pnl_cambiario(serie_total: pd.DataFrame):
 def fig_factura_individual(
     serie_factura: pd.DataFrame,
     factura: str,
-    diferencia_acumulada: float,
-    diferencia_dia: float,
+    dif_total_actual: float,
+    dif_dia_base: float,
 ):
     fig, ax1 = plt.subplots(figsize=(15, 8))
 
@@ -683,8 +699,8 @@ def fig_factura_individual(
     ax2 = ax1.twinx()
     linea2 = ax2.plot(
         serie_factura["fecha"],
-        serie_factura["diferencia_cambio_acumulada"],
-        label="Dif. cambio acumulada",
+        serie_factura["dif_total"],
+        label="Diferencia total",
         linestyle="--",
         linewidth=2.5,
         color="tab:red",
@@ -692,13 +708,13 @@ def fig_factura_individual(
 
     barras = ax2.bar(
         serie_factura["fecha"],
-        serie_factura["diferencia_cambio_dia"].fillna(0),
+        serie_factura["dif_dia_base"].fillna(0),
         alpha=0.20,
-        label="Dif. cambio del día",
+        label="Dif. del día",
     )
 
     ax2.axhline(y=0, linestyle=":", linewidth=1.5, color="black", alpha=0.8)
-    ax2.set_ylabel("Diferencia en cambio (COP)", color="tab:red")
+    ax2.set_ylabel("Diferencia (COP)", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
 
@@ -706,11 +722,11 @@ def fig_factura_individual(
 
     lineas = linea1 + linea2
     etiquetas = [linea.get_label() for linea in lineas]
-    ax1.legend(lineas + [barras], etiquetas + ["Dif. cambio del día"], loc="upper left")
+    ax1.legend(lineas + [barras], etiquetas + ["Dif. del día"], loc="upper left")
 
     texto_resumen = (
-        f"Dif. cambio acumulada: ${diferencia_acumulada:,.2f}   |   "
-        f"Dif. cambio del día: ${diferencia_dia:,.2f}"
+        f"Dif. total: ${dif_total_actual:,.2f}   |   "
+        f"Dif. del día: ${dif_dia_base:,.2f}"
     )
     fig.text(
         0.5,
@@ -731,8 +747,17 @@ def fig_factura_individual(
 # =========================
 st.set_page_config(page_title="Diferencia en cambio", layout="wide")
 st.title("Diferencia en cambio - cartera en USD")
-
+st.caption("VERSION NUEVA - SIN SALDO_USD - TASA_MONETIZACION")
 st.markdown("Sube los archivos y ejecuta el cálculo.")
+
+spread = st.sidebar.number_input(
+    "Spread bancario para escenarios del día",
+    min_value=0.0,
+    max_value=0.20,
+    value=SPREAD_POR_DEFECTO,
+    step=0.005,
+    format="%.3f",
+)
 
 facturas_file = st.file_uploader(
     "Facturas abiertas",
@@ -757,28 +782,46 @@ if facturas_file is not None:
         with st.spinner("Descargando TRM histórica..."):
             df_trm = descargar_trm_historica(fecha_inicial, fecha_final)
 
-        df_facturas = asignar_trm_inicial_automatica(df_facturas, df_trm)
-
+        df_facturas = asignar_trm_factura(df_facturas, df_trm)
         control = validar_monetizaciones_vs_facturas(df_facturas, df_monetizaciones)
 
         trm_actual = float(df_trm["trm"].iloc[-1])
+        trm_ayer = float(df_trm["trm"].iloc[-2]) if len(df_trm) > 1 else trm_actual
 
-        detalle_actual = calcular_resumen_actual(df_facturas, df_monetizaciones, trm_actual)
-        serie_total, detalle_diario = construir_serie_total(
-            df_facturas, df_monetizaciones, df_trm
+        detalle_actual = calcular_resumen_actual(
+            df_facturas,
+            df_monetizaciones,
+            trm_actual,
+            trm_ayer,
+            spread,
         )
 
-        diferencia_total_actual = detalle_actual["diferencia_cambio_acumulada"].sum()
-        valor_total_actual = detalle_actual["valor_actual_cop"].sum()
-        saldo_total_actual_usd = detalle_actual["saldo_vivo_actual_usd"].sum()
+        serie_total, detalle_diario = construir_serie_total(
+            df_facturas,
+            df_monetizaciones,
+            df_trm
+        )
+
+        dif_total_actual = float(detalle_actual["dif_total"].sum())
+        saldo_total_actual_usd = float(detalle_actual["saldo_vivo_actual_usd"].sum())
+        dif_realizada_total = float((detalle_actual["dif_anticipos"] + detalle_actual["dif_realizada_post"]).sum())
+        dif_no_realizada_total = float(detalle_actual["dif_no_realizada"].sum())
+        dif_dia_base_total = float(detalle_actual["dif_dia_base"].sum())
+        dif_dia_plus_total = float(detalle_actual["dif_dia_plus_2pct"].sum())
+        dif_dia_minus_total = float(detalle_actual["dif_dia_minus_2pct"].sum())
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("TRM actual", f"${trm_actual:,.2f}")
-        c2.metric("Saldo total USD", f"${saldo_total_actual_usd:,.2f}")
-        c3.metric("Valor total COP", f"${valor_total_actual:,.2f}")
-        c4.metric("Dif. cambio acumulada", f"${diferencia_total_actual:,.2f}")
+        c2.metric("Saldo vivo total USD", f"${saldo_total_actual_usd:,.2f}")
+        c3.metric("Dif. realizada total", f"${dif_realizada_total:,.2f}")
+        c4.metric("Dif. no realizada total", f"${dif_no_realizada_total:,.2f}")
 
-        with st.expander("Control de consistencia monetizaciones vs saldo actual"):
+        c5, c6, c7 = st.columns(3)
+        c5.metric("Dif. día base", f"${dif_dia_base_total:,.2f}")
+        c6.metric(f"Dif. día +{spread:.1%}", f"${dif_dia_plus_total:,.2f}")
+        c7.metric(f"Dif. día -{spread:.1%}", f"${dif_dia_minus_total:,.2f}")
+
+        with st.expander("Control monetizaciones vs valor original"):
             if control.empty:
                 st.info("No se cargaron monetizaciones.")
             else:
@@ -797,14 +840,17 @@ if facturas_file is not None:
                         "cliente",
                         "fecha_factura",
                         "valor_usd",
-                        "saldo_usd",
-                        "trm_inicial",
+                        "trm_factura",
                         "anticipo_previo_total_usd",
-                        "monetizado_usd",
+                        "abonos_post_factura_total_usd",
                         "saldo_vivo_actual_usd",
-                        "valor_inicial_cop",
-                        "valor_actual_cop",
-                        "diferencia_cambio_acumulada",
+                        "dif_anticipos",
+                        "dif_realizada_post",
+                        "dif_no_realizada",
+                        "dif_total",
+                        "dif_dia_base",
+                        "dif_dia_plus_2pct",
+                        "dif_dia_minus_2pct",
                     ]
                 ],
                 use_container_width=True,
@@ -820,12 +866,9 @@ if facturas_file is not None:
         with tab2:
             st.subheader("Gráficas generales")
             st.pyplot(fig_trm(serie_total), clear_figure=True)
-            st.pyplot(fig_valor_cartera(serie_total), clear_figure=True)
-            st.pyplot(
-                fig_trm_y_diferencia_cambio(serie_total, diferencia_total_actual),
-                clear_figure=True,
-            )
-            st.pyplot(fig_pnl_cambiario(serie_total), clear_figure=True)
+            st.pyplot(fig_saldo_vivo(serie_total), clear_figure=True)
+            st.pyplot(fig_trm_y_diferencia_total(serie_total, dif_total_actual), clear_figure=True)
+            st.pyplot(fig_pnl_dia(serie_total), clear_figure=True)
 
         with tab3:
             st.subheader("Consulta por factura")
@@ -843,20 +886,18 @@ if facturas_file is not None:
                 )
 
                 ultimo = serie_factura.iloc[-1]
-                penultimo = serie_factura.iloc[-2] if len(serie_factura) > 1 else ultimo
+                saldo_vivo_actual = float(ultimo["saldo_vivo_usd"])
+                dif_total_fact = float(ultimo["dif_total"])
+                dif_dia_fact = float(ultimo["dif_dia_base"])
 
-                diferencia_acumulada = float(ultimo["diferencia_cambio_acumulada"])
-                diferencia_dia = float(
-                    ultimo["diferencia_cambio_acumulada"]
-                    - penultimo["diferencia_cambio_acumulada"]
-                )
-                saldo_actual_usd = float(ultimo["saldo_vivo_usd"])
-                valor_liquidacion_hoy = saldo_actual_usd * trm_actual
+                dif_dia_plus_fact = saldo_vivo_actual * ((trm_actual * (1 + spread)) - trm_ayer)
+                dif_dia_minus_fact = saldo_vivo_actual * ((trm_actual * (1 - spread)) - trm_ayer)
 
-                a1, a2, a3 = st.columns(3)
-                a1.metric("Saldo actual USD", f"${saldo_actual_usd:,.2f}")
-                a2.metric("Dif. cambio acumulada", f"${diferencia_acumulada:,.2f}")
-                a3.metric("Dif. cambio del día", f"${diferencia_dia:,.2f}")
+                a1, a2, a3, a4 = st.columns(4)
+                a1.metric("Saldo vivo USD", f"${saldo_vivo_actual:,.2f}")
+                a2.metric("Dif. total", f"${dif_total_fact:,.2f}")
+                a3.metric("Dif. día base", f"${dif_dia_fact:,.2f}")
+                a4.metric(f"Dif. día ±{spread:.1%}", f"+ ${dif_dia_plus_fact:,.2f} / - ${dif_dia_minus_fact:,.2f}")
 
                 st.write(
                     {
@@ -864,9 +905,8 @@ if facturas_file is not None:
                         "cliente": fila_factura["cliente"],
                         "fecha_factura": fila_factura["fecha_factura"],
                         "valor_original_usd": float(fila_factura["valor_usd"]),
-                        "trm_inicial": float(fila_factura["trm_inicial"]),
+                        "trm_factura": float(fila_factura["trm_factura"]),
                         "trm_actual": trm_actual,
-                        "valor_liquidacion_hoy_cop": valor_liquidacion_hoy,
                     }
                 )
 
@@ -874,8 +914,8 @@ if facturas_file is not None:
                     fig_factura_individual(
                         serie_factura,
                         factura_sel,
-                        diferencia_acumulada,
-                        diferencia_dia,
+                        dif_total_fact,
+                        dif_dia_fact,
                     ),
                     clear_figure=True,
                 )
