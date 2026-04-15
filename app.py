@@ -680,9 +680,14 @@ def fig_factura_individual(
     factura: str,
     dif_total_actual: float,
     dif_dia_base: float,
+    df_monetizaciones: pd.DataFrame,
+    fila_factura: pd.Series,
 ):
     fig, ax1 = plt.subplots(figsize=(15, 8))
 
+    # =====================
+    # LINEA TRM
+    # =====================
     linea1 = ax1.plot(
         serie_factura["fecha"],
         serie_factura["trm"],
@@ -690,13 +695,18 @@ def fig_factura_individual(
         linewidth=2,
         color="tab:blue",
     )
+
     ax1.set_xlabel("Fecha")
     ax1.set_ylabel("TRM (COP por USD)", color="tab:blue")
     ax1.tick_params(axis="y", labelcolor="tab:blue")
     ax1.yaxis.set_major_formatter(FuncFormatter(formato_pesos_decimales))
     ax1.grid(True, alpha=0.3)
 
+    # =====================
+    # LINEA DIFERENCIA
+    # =====================
     ax2 = ax1.twinx()
+
     linea2 = ax2.plot(
         serie_factura["fecha"],
         serie_factura["dif_total"],
@@ -706,6 +716,7 @@ def fig_factura_individual(
         color="tab:red",
     )
 
+    # barras diferencia del día
     barras = ax2.bar(
         serie_factura["fecha"],
         serie_factura["dif_dia_base"].fillna(0),
@@ -718,16 +729,80 @@ def fig_factura_individual(
     ax2.tick_params(axis="y", labelcolor="tab:red")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
 
+    # =====================
+    # MONETIZACIONES (PUNTOS)
+    # =====================
+    monet = df_monetizaciones[df_monetizaciones["factura"] == factura].copy()
+
+    if not monet.empty:
+        monet["fecha"] = pd.to_datetime(monet["fecha"]).dt.normalize()
+        fecha_factura = pd.to_datetime(fila_factura["fecha_factura"]).normalize()
+
+        anticipos = monet[monet["fecha"] < fecha_factura]
+        post = monet[monet["fecha"] >= fecha_factura]
+
+        # anticipos (verde)
+        if not anticipos.empty:
+            y_vals = serie_factura.set_index("fecha").loc[anticipos["fecha"], "trm"].values
+            ax1.scatter(
+                anticipos["fecha"],
+                y_vals,
+                color="green",
+                s=60,
+                label="Anticipos",
+                zorder=5,
+            )
+
+            # etiquetas
+            for i, row in anticipos.iterrows():
+                ax1.annotate(
+                    f"{row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
+                    (row["fecha"], serie_factura.set_index("fecha").loc[row["fecha"], "trm"]),
+                    textcoords="offset points",
+                    xytext=(0, 10),
+                    ha="center",
+                    fontsize=8,
+                    color="green",
+                )
+
+        # post factura (naranja)
+        if not post.empty:
+            y_vals = serie_factura.set_index("fecha").loc[post["fecha"], "trm"].values
+            ax1.scatter(
+                post["fecha"],
+                y_vals,
+                color="orange",
+                s=60,
+                label="Post-factura",
+                zorder=5,
+            )
+
+            for i, row in post.iterrows():
+                ax1.annotate(
+                    f"{row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
+                    (row["fecha"], serie_factura.set_index("fecha").loc[row["fecha"], "trm"]),
+                    textcoords="offset points",
+                    xytext=(0, -15),
+                    ha="center",
+                    fontsize=8,
+                    color="orange",
+                )
+
+    # =====================
+    # LEYENDA Y TITULO
+    # =====================
     plt.title(f"Detalle de diferencia en cambio - Factura {factura}")
 
     lineas = linea1 + linea2
     etiquetas = [linea.get_label() for linea in lineas]
     ax1.legend(lineas + [barras], etiquetas + ["Dif. del día"], loc="upper left")
 
+    # resumen abajo
     texto_resumen = (
         f"Dif. total: ${dif_total_actual:,.2f}   |   "
         f"Dif. del día: ${dif_dia_base:,.2f}"
     )
+
     fig.text(
         0.5,
         0.02,
@@ -739,6 +814,7 @@ def fig_factura_individual(
     )
 
     fig.tight_layout(rect=[0, 0.06, 1, 1])
+
     return fig
 
 
@@ -912,13 +988,15 @@ if facturas_file is not None:
 
                 st.pyplot(
                     fig_factura_individual(
-                        serie_factura,
-                        factura_sel,
-                        dif_total_fact,
-                        dif_dia_fact,
-                    ),
+                    serie_factura,
+                    factura_sel,
+                    dif_total_fact,
+                    dif_dia_fact,
+                    df_monetizaciones,
+                    fila_factura,
+                        ),
                     clear_figure=True,
-                )
+                    )
 
         with tab4:
             st.subheader("Descargar resultados")
