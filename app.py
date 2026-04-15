@@ -41,7 +41,6 @@ def validar_columnas_facturas(df: pd.DataFrame) -> None:
         "moneda",
         "valor_usd",
         "saldo_usd",
-        "trm_inicial",
     }
     faltantes = columnas_requeridas - set(df.columns)
     if faltantes:
@@ -67,12 +66,12 @@ def cargar_facturas(archivo) -> pd.DataFrame:
     if df["fecha_factura"].isna().any():
         raise ValueError("Hay fechas inválidas en 'fecha_factura'.")
 
-    for col in ["valor_usd", "saldo_usd", "trm_inicial"]:
+    for col in ["valor_usd", "saldo_usd"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    if df[["valor_usd", "saldo_usd", "trm_inicial"]].isna().any().any():
+    if df[["valor_usd", "saldo_usd"]].isna().any().any():
         raise ValueError(
-            "Hay valores no numéricos o vacíos en 'valor_usd', 'saldo_usd' o 'trm_inicial'."
+            "Hay valores no numéricos o vacíos en 'valor_usd' o 'saldo_usd'."
         )
 
     df = df.copy()
@@ -235,6 +234,40 @@ def descargar_trm_desde_datos_abiertos(
     return df_expandido
 
 
+def asignar_trm_inicial_automatica(
+    df_facturas: pd.DataFrame,
+    df_trm: pd.DataFrame,
+) -> pd.DataFrame:
+    facturas = df_facturas.copy()
+    trm = df_trm.copy()
+
+    facturas["fecha_factura_norm"] = pd.to_datetime(facturas["fecha_factura"]).dt.normalize()
+    trm["fecha"] = pd.to_datetime(trm["fecha"]).dt.normalize()
+
+    facturas = facturas.sort_values("fecha_factura_norm")
+    trm = trm.sort_values("fecha")
+
+    facturas = pd.merge_asof(
+        facturas,
+        trm[["fecha", "trm"]],
+        left_on="fecha_factura_norm",
+        right_on="fecha",
+        direction="backward",
+    )
+
+    if facturas["trm"].isna().any():
+        faltantes = facturas.loc[facturas["trm"].isna(), ["factura", "fecha_factura"]]
+        raise ValueError(
+            "No fue posible asignar TRM inicial a algunas facturas:\n"
+            f"{faltantes}"
+        )
+
+    facturas = facturas.rename(columns={"trm": "trm_inicial"})
+    facturas = facturas.drop(columns=["fecha", "fecha_factura_norm"])
+
+    return facturas
+
+
 # =========================
 # CÁLCULOS
 # =========================
@@ -284,14 +317,37 @@ def calcular_resumen_actual(
         else pd.DataFrame(columns=["factura", "monto_usd"])
     )
 
+    anticipos_previos = pd.DataFrame(columns=["factura", "anticipo_previo_total_usd"])
+    if not df_monetizaciones.empty:
+        tmp = df_monetizaciones.merge(
+            df_facturas[["factura", "fecha_factura"]],
+            on="factura",
+            how="left",
+        )
+        anticipos_previos = (
+            tmp[tmp["fecha"] < tmp["fecha_factura"]]
+            .groupby("factura", as_index=False)["monto_usd"]
+            .sum()
+            .rename(columns={"monto_usd": "anticipo_previo_total_usd"})
+        )
+
     detalle = df_facturas.copy().merge(
         monet_por_factura.rename(columns={"monto_usd": "monetizado_usd"}),
         on="factura",
         how="left",
     )
-    detalle["monetizado_usd"] = detalle["monetizado_usd"].fillna(0.0)
+    detalle = detalle.merge(
+        anticipos_previos,
+        on="factura",
+        how="left",
+    )
 
+    detalle["monetizado_usd"] = detalle["monetizado_usd"].fillna(0.0)
+    detalle["anticipo_previo_total_usd"] = detalle["anticipo_previo_total_usd"].fillna(0.0)
+
+    # saldo_usd ya representa el saldo actual pendiente
     detalle["saldo_vivo_actual_usd"] = detalle["saldo_usd"]
+
     detalle["valor_inicial_cop"] = detalle["saldo_vivo_actual_usd"] * detalle["trm_inicial"]
     detalle["valor_actual_cop"] = detalle["saldo_vivo_actual_usd"] * trm_actual
     detalle["diferencia_cambio_acumulada"] = (
@@ -315,8 +371,8 @@ def construir_saldos_diarios(
 
     for _, fila in df_facturas.iterrows():
         factura = fila["factura"]
-        fecha_factura = fila["fecha_factura"].normalize()
-        saldo_inicial = float(fila["valor_usd"])
+        fecha_factura = pd.to_datetime(fila["fecha_factura"]).normalize()
+        valor_usd = float(fila["valor_usd"])
         trm_inicial = float(fila["trm_inicial"])
         cliente = fila["cliente"]
 
@@ -326,19 +382,29 @@ def construir_saldos_diarios(
         ).copy()
 
         if not monet_fact.empty:
-            monet_fact["fecha"] = monet_fact["fecha"].dt.normalize()
+            monet_fact["fecha"] = pd.to_datetime(monet_fact["fecha"]).dt.normalize()
+
+        anticipo_previo = 0.0
+        if not monet_fact.empty:
+            anticipo_previo = monet_fact.loc[
+                monet_fact["fecha"] < fecha_factura, "monto_usd"
+            ].sum()
 
         for fecha in fechas:
             if fecha < fecha_factura:
                 saldo_vivo = 0.0
+                anticipo_aplicado = anticipo_previo
+                abonos_post_factura = 0.0
             else:
-                monetizado_acumulado = 0.0
+                abonos_post_factura = 0.0
                 if not monet_fact.empty:
-                    monetizado_acumulado = monet_fact.loc[
-                        monet_fact["fecha"] <= fecha, "monto_usd"
+                    abonos_post_factura = monet_fact.loc[
+                        (monet_fact["fecha"] >= fecha_factura) & (monet_fact["fecha"] <= fecha),
+                        "monto_usd"
                     ].sum()
 
-                saldo_vivo = max(saldo_inicial - monetizado_acumulado, 0.0)
+                saldo_vivo = max(valor_usd - anticipo_previo - abonos_post_factura, 0.0)
+                anticipo_aplicado = anticipo_previo
 
             registros.append(
                 {
@@ -346,6 +412,8 @@ def construir_saldos_diarios(
                     "factura": factura,
                     "cliente": cliente,
                     "saldo_vivo_usd": saldo_vivo,
+                    "anticipo_previo_usd": anticipo_aplicado,
+                    "abonos_post_factura_usd": abonos_post_factura,
                     "trm_inicial": trm_inicial,
                 }
             )
@@ -407,21 +475,28 @@ def construir_serie_factura(
         monet_fact["fecha"] = pd.to_datetime(monet_fact["fecha"]).dt.normalize()
         monet_fact = monet_fact.sort_values("fecha")
 
+    anticipo_previo = 0.0
+    if not monet_fact.empty:
+        anticipo_previo = monet_fact.loc[
+            monet_fact["fecha"] < fecha_factura, "monto_usd"
+        ].sum()
+
     fechas = df_trm["fecha"].sort_values().reset_index(drop=True)
     registros = []
 
     for fecha in fechas:
         if fecha < fecha_factura:
             saldo_vivo = 0.0
-            monetizado_acumulado = 0.0
+            abonos_post_factura = 0.0
         else:
-            monetizado_acumulado = 0.0
+            abonos_post_factura = 0.0
             if not monet_fact.empty:
-                monetizado_acumulado = monet_fact.loc[
-                    monet_fact["fecha"] <= fecha, "monto_usd"
+                abonos_post_factura = monet_fact.loc[
+                    (monet_fact["fecha"] >= fecha_factura) & (monet_fact["fecha"] <= fecha),
+                    "monto_usd"
                 ].sum()
 
-            saldo_vivo = max(valor_usd - monetizado_acumulado, 0.0)
+            saldo_vivo = max(valor_usd - anticipo_previo - abonos_post_factura, 0.0)
 
         registros.append(
             {
@@ -429,7 +504,8 @@ def construir_serie_factura(
                 "factura": factura,
                 "cliente": cliente,
                 "saldo_vivo_usd": saldo_vivo,
-                "monetizado_acumulado_usd": monetizado_acumulado,
+                "anticipo_previo_usd": anticipo_previo,
+                "abonos_post_factura_usd": abonos_post_factura,
                 "trm_inicial": trm_inicial,
             }
         )
@@ -675,13 +751,15 @@ if facturas_file is not None:
         df_facturas = cargar_facturas(facturas_file)
         df_monetizaciones = cargar_monetizaciones(monetizaciones_file)
 
-        control = validar_monetizaciones_vs_facturas(df_facturas, df_monetizaciones)
-
         fecha_inicial = df_facturas["fecha_factura"].min().normalize()
         fecha_final = pd.Timestamp.today().normalize()
 
         with st.spinner("Descargando TRM histórica..."):
             df_trm = descargar_trm_historica(fecha_inicial, fecha_final)
+
+        df_facturas = asignar_trm_inicial_automatica(df_facturas, df_trm)
+
+        control = validar_monetizaciones_vs_facturas(df_facturas, df_monetizaciones)
 
         trm_actual = float(df_trm["trm"].iloc[-1])
 
@@ -712,7 +790,25 @@ if facturas_file is not None:
 
         with tab1:
             st.subheader("Detalle actual por factura")
-            st.dataframe(detalle_actual, use_container_width=True)
+            st.dataframe(
+                detalle_actual[
+                    [
+                        "factura",
+                        "cliente",
+                        "fecha_factura",
+                        "valor_usd",
+                        "saldo_usd",
+                        "trm_inicial",
+                        "anticipo_previo_total_usd",
+                        "monetizado_usd",
+                        "saldo_vivo_actual_usd",
+                        "valor_inicial_cop",
+                        "valor_actual_cop",
+                        "diferencia_cambio_acumulada",
+                    ]
+                ],
+                use_container_width=True,
+            )
 
             st.subheader("Serie total")
             st.dataframe(serie_total.tail(30), use_container_width=True)
@@ -766,7 +862,9 @@ if facturas_file is not None:
                     {
                         "factura": factura_sel,
                         "cliente": fila_factura["cliente"],
+                        "fecha_factura": fila_factura["fecha_factura"],
                         "valor_original_usd": float(fila_factura["valor_usd"]),
+                        "trm_inicial": float(fila_factura["trm_inicial"]),
                         "trm_actual": trm_actual,
                         "valor_liquidacion_hoy_cop": valor_liquidacion_hoy,
                     }
