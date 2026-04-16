@@ -732,6 +732,8 @@ def fig_factura_individual(
     dif_dia_base: float,
     df_monetizaciones: pd.DataFrame,
     fila_factura: pd.Series,
+    mostrar_etiquetas: bool = True,
+    umbral_etiqueta_usd: float = 0.0,
 ):
     fig, ax1 = plt.subplots(figsize=(15, 8))
 
@@ -774,7 +776,6 @@ def fig_factura_individual(
         serie_factura, df_monetizaciones, factura, fila_factura
     )
 
-    # tamaños por monto
     if not anticipos_plot.empty:
         anticipos_plot["size"] = _escalar_tamano_puntos(anticipos_plot["monto_usd"])
         anticipos_plot["color"] = anticipos_plot["dif_mov"].apply(lambda x: "green" if x >= 0 else "red")
@@ -790,16 +791,18 @@ def fig_factura_individual(
             zorder=5,
         )
 
-        for _, row in anticipos_plot.iterrows():
-            ax1.annotate(
-                f"A | {row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
-                (row["fecha"], row["trm"]),
-                textcoords="offset points",
-                xytext=(0, 10),
-                ha="center",
-                fontsize=8,
-                color=row["color"],
-            )
+        if mostrar_etiquetas:
+            anticipos_lbl = anticipos_plot[anticipos_plot["monto_usd"] >= umbral_etiqueta_usd]
+            for _, row in anticipos_lbl.iterrows():
+                ax1.annotate(
+                    f"A | {row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
+                    (row["fecha"], row["trm"]),
+                    textcoords="offset points",
+                    xytext=(0, 10),
+                    ha="center",
+                    fontsize=8,
+                    color=row["color"],
+                )
 
     if not post_plot.empty:
         post_plot["size"] = _escalar_tamano_puntos(post_plot["monto_usd"])
@@ -817,16 +820,18 @@ def fig_factura_individual(
             zorder=5,
         )
 
-        for _, row in post_plot.iterrows():
-            ax1.annotate(
-                f"P | {row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
-                (row["fecha"], row["trm"]),
-                textcoords="offset points",
-                xytext=(0, -18),
-                ha="center",
-                fontsize=8,
-                color=row["color"],
-            )
+        if mostrar_etiquetas:
+            post_lbl = post_plot[post_plot["monto_usd"] >= umbral_etiqueta_usd]
+            for _, row in post_lbl.iterrows():
+                ax1.annotate(
+                    f"P | {row['monto_usd']:,.0f}\n{row['tasa_monetizacion']:,.0f}",
+                    (row["fecha"], row["trm"]),
+                    textcoords="offset points",
+                    xytext=(0, -18),
+                    ha="center",
+                    fontsize=8,
+                    color=row["color"],
+                )
 
     plt.title(f"Detalle de diferencia en cambio - Factura {factura}")
 
@@ -860,7 +865,6 @@ def fig_factura_individual(
 
     fig.tight_layout(rect=[0, 0.06, 1, 1])
     return fig
-
 
 # =========================
 # APP
@@ -990,8 +994,9 @@ if facturas_file is not None:
             st.pyplot(fig_trm_y_diferencia_total(serie_total, dif_total_actual), clear_figure=True)
             st.pyplot(fig_pnl_dia(serie_total), clear_figure=True)
 
-        with tab3:
+        w        with tab3:
             st.subheader("Consulta por factura")
+
             factura_sel = st.selectbox(
                 "Selecciona una factura",
                 options=sorted(df_facturas["factura"].astype(str).unique().tolist()),
@@ -999,6 +1004,31 @@ if facturas_file is not None:
 
             if factura_sel:
                 fila_factura = df_facturas[df_facturas["factura"] == factura_sel].iloc[0]
+
+                # =========================
+                # CONTROLES NUEVOS 👇
+                # =========================
+                st.subheader("Opciones de visualización")
+
+                col_opt1, col_opt2 = st.columns(2)
+
+                with col_opt1:
+                    mostrar_etiquetas = st.checkbox(
+                        "Mostrar etiquetas de monetizaciones",
+                        value=True,
+                    )
+
+                with col_opt2:
+                    umbral_etiqueta_usd = st.number_input(
+                        "Etiquetar solo movimientos desde USD",
+                        min_value=0.0,
+                        value=0.0,
+                        step=500.0,
+                    )
+
+                # =========================
+                # SERIE DE LA FACTURA
+                # =========================
                 serie_factura = construir_serie_factura(
                     fila_factura,
                     df_monetizaciones,
@@ -1006,14 +1036,10 @@ if facturas_file is not None:
                 )
 
                 ultimo = serie_factura.iloc[-1]
+
                 saldo_vivo_actual = float(ultimo["saldo_vivo_usd"])
                 dif_total_fact = float(ultimo["dif_total"])
                 dif_dia_fact = float(ultimo["dif_dia_base"])
-                dif_anticipos_fact = float(ultimo["dif_anticipos"])
-                dif_realizada_post_fact = float(ultimo["dif_realizada_post"])
-                dif_no_realizada_fact = float(ultimo["dif_no_realizada"])
-                anticipo_previo_fact = float(ultimo["anticipo_previo_usd"])
-                abonos_post_fact = float(ultimo["abonos_post_factura_usd"])
 
                 dif_dia_plus_fact = saldo_vivo_actual * ((trm_actual * (1 + spread)) - trm_ayer)
                 dif_dia_minus_fact = saldo_vivo_actual * ((trm_actual * (1 - spread)) - trm_ayer)
@@ -1022,17 +1048,10 @@ if facturas_file is not None:
                 a1.metric("Saldo vivo USD", f"${saldo_vivo_actual:,.2f}")
                 a2.metric("Dif. total", f"${dif_total_fact:,.2f}")
                 a3.metric("Dif. día base", f"${dif_dia_fact:,.2f}")
-                a4.metric(f"Dif. día ±{spread:.1%}", f"+ ${dif_dia_plus_fact:,.2f} / - ${dif_dia_minus_fact:,.2f}")
-
-                b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Anticipos USD", f"${anticipo_previo_fact:,.2f}")
-                b2.metric("Abonos post USD", f"${abonos_post_fact:,.2f}")
-                b3.metric("Dif. anticipos", f"${dif_anticipos_fact:,.2f}")
-                b4.metric("Dif. realizada post", f"${dif_realizada_post_fact:,.2f}")
-
-                c1, c2 = st.columns(2)
-                c1.metric("Dif. no realizada", f"${dif_no_realizada_fact:,.2f}")
-                c2.metric("TRM factura", f"${float(fila_factura['trm_factura']):,.2f}")
+                a4.metric(
+                    f"Dif. día ±{spread:.1%}",
+                    f"+ ${dif_dia_plus_fact:,.2f} / - ${dif_dia_minus_fact:,.2f}",
+                )
 
                 st.write(
                     {
@@ -1045,36 +1064,21 @@ if facturas_file is not None:
                     }
                 )
 
-                movimientos_factura = df_monetizaciones[
-                    df_monetizaciones["factura"] == factura_sel
-                ].copy()
-
-                if not movimientos_factura.empty:
-                    fecha_factura = pd.to_datetime(fila_factura["fecha_factura"]).normalize()
-                    movimientos_factura["fecha"] = pd.to_datetime(movimientos_factura["fecha"]).dt.normalize()
-                    movimientos_factura["tipo_mov"] = movimientos_factura["fecha"].apply(
-                        lambda x: "Anticipo" if x < fecha_factura else "Post-factura"
-                    )
-                    movimientos_factura["dif_mov"] = movimientos_factura.apply(
-                        lambda r: (fila_factura["trm_factura"] - r["tasa_monetizacion"]) * r["monto_usd"]
-                        if r["tipo_mov"] == "Anticipo"
-                        else (r["tasa_monetizacion"] - fila_factura["trm_factura"]) * r["monto_usd"],
-                        axis=1,
-                    )
-                    st.subheader("Movimientos de la factura")
-                    st.dataframe(movimientos_factura, use_container_width=True)
-
-                st.pyplot(
-                    fig_factura_individual(
-                        serie_factura,
-                        factura_sel,
-                        dif_total_fact,
-                        dif_dia_fact,
-                        df_monetizaciones,
-                        fila_factura,
-                    ),
-                    clear_figure=True,
+                # =========================
+                # GRÁFICA CON CONTROLES
+                # =========================
+                fig = fig_factura_individual(
+                    serie_factura,
+                    factura_sel,
+                    dif_total_fact,
+                    dif_dia_fact,
+                    df_monetizaciones,
+                    fila_factura,
+                    mostrar_etiquetas=mostrar_etiquetas,
+                    umbral_etiqueta_usd=umbral_etiqueta_usd,
                 )
+
+                st.pyplot(fig, clear_figure=True)
 
         with tab4:
             st.subheader("Descargar resultados")
