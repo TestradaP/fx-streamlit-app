@@ -1078,7 +1078,86 @@ def app_flujo_caja():
     fig_fc.tight_layout()
     st.pyplot(fig_fc, clear_figure=True)
 
+# =========================
+# APP 4: SIMULADOR DE CICLO DE CAJA (ESTRATEGIA)
+# =========================
+def app_simulador_ccc():
+    st.title("🔄 Simulador de Ciclo de Conversión de Efectivo (CCC)")
+    st.markdown("Analiza el impacto del **Factoring** y el **Confirming** en la liquidez de la empresa mediante escenarios aproximados.")
 
+    st.markdown("### 1. Parámetros Actuales (Aproximados)")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        ventas_anuales = st.number_input("Ventas Anuales Estimadas (COP)", value=1000000000, step=100000000)
+    with col2:
+        dio_actual = st.number_input("Días de Inventario (DIO)", value=45)
+    with col3:
+        dso_actual = st.number_input("Días de Cobro Actuales (DSO)", value=60, help="Días promedio que tardan los clientes en pagar.")
+    with col4:
+        dpo_actual = st.number_input("Días de Pago Actuales (DPO)", value=30, help="Días promedio que tardamos en pagar a proveedores.")
+
+    ccc_actual = dio_actual + dso_actual - dpo_actual
+    ventas_diarias = ventas_anuales / 365
+
+    st.info(f"**Ciclo de Caja Actual:** {ccc_actual} días. *(La empresa necesita financiar {ccc_actual} días de operación)*")
+
+    st.markdown("### 2. Simulación de Estrategias Financieras")
+    st.markdown("Ajusta los controles para ver el impacto de ceder cartera (Factoring) o usar cupos de proveedores (Confirming).")
+
+    scol1, scol2 = st.columns(2)
+    with scol1:
+        st.markdown("**Estrategia de Factoring (Cobro Anticipado)**")
+        dso_simulado = st.slider("Nuevos Días de Cobro (DSO)", min_value=0, max_value=int(dso_actual), value=int(dso_actual), help="Bajar este número simula la venta de facturas al banco para obtener liquidez inmediata.")
+    
+    with scol2:
+        st.markdown("**Estrategia de Confirming (Extensión de Pago)**")
+        dpo_simulado = st.slider("Nuevos Días de Pago (DPO)", min_value=int(dpo_actual), max_value=180, value=int(dpo_actual), help="Subir este número simula usar un banco para pagarle al proveedor hoy, pero nosotros le pagamos al banco a más plazo.")
+
+    ccc_simulado = dio_actual + dso_simulado - dpo_simulado
+    dias_ganados = ccc_actual - ccc_simulado
+    caja_liberada = dias_ganados * ventas_diarias
+
+    st.markdown("### 3. Resultados de la Simulación")
+    
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Nuevo Ciclo de Caja (CCC)", f"{ccc_simulado} días", f"{-dias_ganados} días de mejora", delta_color="inverse")
+    r2.metric("Venta Promedio Diaria", f"${ventas_diarias:,.0f}")
+    r3.metric("💰 Capital de Trabajo Liberado", f"${caja_liberada:,.0f}", "Liquidez Inyectada")
+
+    # Gráfica Comparativa
+    fig, ax = plt.subplots(figsize=(10, 4))
+    
+    # Datos para la gráfica (Solo DSO y DPO para no opacar con el inventario)
+    categorias = ['Actual', 'Simulado']
+    dso_vals = [dso_actual, dso_simulado]
+    dpo_vals = [-dpo_actual, -dpo_simulado] # Negativo porque financia
+
+    ax.bar(categorias, dso_vals, label='Días de Cobro (+)', color='#E15554', alpha=0.8)
+    ax.bar(categorias, dpo_vals, label='Días de Pago (-)', color='#50E3C2', alpha=0.8)
+    
+    ax.axhline(0, color='black', linewidth=1)
+    ax.set_ylabel("Días")
+    ax.set_title("Evolución del Apalancamiento Comercial")
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend()
+
+    # Anotaciones
+    ax.text(0, dso_actual + 2, f"{dso_actual}d", ha='center')
+    ax.text(1, dso_simulado + 2, f"{dso_simulado}d", ha='center')
+    ax.text(0, -dpo_actual - 10, f"{dpo_actual}d", ha='center')
+    ax.text(1, -dpo_simulado - 10, f"{dpo_simulado}d", ha='center')
+
+    st.pyplot(fig, clear_figure=True)
+
+    if caja_liberada > 0:
+        st.success(f"**Conclusión Estratégica:** Al implementar estas herramientas, la empresa liberaría aproximadamente **${caja_liberada:,.0f} COP** que antes estaban atrapados en el ciclo operativo, mejorando radicalmente la liquidez para el Flujo de Caja de corto plazo.")
+
+
+# =========================
+# MENÚ PRINCIPAL
+# =========================
 # =========================
 # MENÚ PRINCIPAL
 # =========================
@@ -1086,7 +1165,7 @@ def main():
     st.sidebar.title("Navegación")
     app_seleccionada = st.sidebar.radio(
         "¿Qué aplicación quieres utilizar?",
-        ("Diferencia en cambio", "Revisar facturas de compras", "Flujo de Caja a 4 Semanas")
+        ("Diferencia en cambio", "Revisar facturas de compras", "Flujo de Caja a 4 Semanas", "Simulador Estratégico CCC")
     )
     
     st.sidebar.markdown("---")
@@ -1097,6 +1176,8 @@ def main():
         app_facturas_compras()
     elif app_seleccionada == "Flujo de Caja a 4 Semanas":
         app_flujo_caja()
+    elif app_seleccionada == "Simulador Estratégico CCC":
+        app_simulador_ccc()
         
 if __name__ == "__main__":
     main()
