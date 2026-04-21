@@ -28,10 +28,10 @@ SPREAD_POR_DEFECTO = 0.02
 # =========================
 # FORMATO
 # =========================
-def formato_pesos(x, pos):
+def formato_pesos(x, pos=None):
     return f"${x:,.0f}"
 
-def formato_pesos_decimales(x, pos):
+def formato_pesos_decimales(x, pos=None):
     return f"${x:,.2f}"
 
 
@@ -597,203 +597,193 @@ def app_diferencia_cambio():
 
 
 # =========================
-# APP 2: FACTURAS DE COMPRAS (Nueva funcionalidad)
-# =========================
-
-# =========================
-# APP 2: FACTURAS DE COMPRAS (Corregida)
-# =========================
-
-# =========================
-# APP 2: FACTURAS DE COMPRAS (Corregida)
-# =========================
-
-# =========================
-# APP 2: FACTURAS DE COMPRAS (Corregida Definitivamente)
+# APP 2: FACTURAS DE COMPRAS (Versión Dashboard Multicarga)
 # =========================
 
 def app_facturas_compras():
-    st.title("📊 Análisis de Facturas de Compras")
-    st.markdown("Sube tu archivo para analizar el estado financiero de tus proveedores.")
+    st.title("📊 Dashboard de Facturas de Compras")
+    st.markdown("Sube uno o varios archivos (ej. por mes) para analizar el estado financiero general y por grupos de proveedores.")
 
-    compras_file = st.file_uploader(
-        "Archivo de Facturas de Compras",
+    # 1. PERMITIR MÚLTIPLES ARCHIVOS (accept_multiple_files=True)
+    compras_files = st.file_uploader(
+        "Archivo(s) de Facturas de Compras",
         type=["xlsx", "xlsm", "xls"],
-        key="compras_file"
+        key="compras_files",
+        accept_multiple_files=True
     )
 
-    if compras_file is None:
-        st.info("👆 Sube tu archivo para comenzar el análisis.")
+    if not compras_files:
+        st.info("👆 Sube tus archivos Excel para comenzar el análisis.")
         return
 
     try:
-        # =========================
-        # LECTURA ROBUSTA DE EXCEL
-        # =========================
-        df = pd.read_excel(
-            compras_file,
-            header=0,              
-            engine="openpyxl"
-        )
+        dfs = []
+        # 2. PROCESAR CADA ARCHIVO SUBIDO
+        for file in compras_files:
+            df_temp = pd.read_excel(file, header=0, engine="openpyxl")
+            
+            if isinstance(df_temp.columns, pd.MultiIndex):
+                df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
+            
+            # Limpieza segura de columnas
+            df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
+            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+            
+            rename_map = {
+                "GENERACION": "GENERACIO",
+                "FECHA_GENERACION": "GENERACIO"
+            }
+            df_temp = df_temp.rename(columns=rename_map)
+            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
 
-        # Si hay columnas tipo multiindex (muy común en xlsm)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df.columns]
+            columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
+            if not columnas_requeridas.issubset(df_temp.columns):
+                st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
+                continue
 
-        # =========================
-        # LIMPIEZA DE COLUMNAS 
-        # =========================
-        
-        # 1. Limpiar strings: Quitar espacios al inicio/final y pasar a mayúsculas
-        cleaned_cols = [str(col).strip().upper() for col in df.columns]
-        df.columns = cleaned_cols
+            # Limpieza de datos básica
+            df_temp = df_temp.dropna(subset=["PROVEEDOR"])
+            df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
+            df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce")
+            df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce")
+            df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
+            df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
+            
+            # Añadir a la lista de DataFrames
+            dfs.append(df_temp)
 
-        # 2. Eliminar columnas que estén 100% duplicadas desde el inicio
-        is_duplicated = df.columns.duplicated(keep='first')
-        df = df.loc[:, ~is_duplicated]
-
-        # 3. Renombrar "GENERACION" a "GENERACIO". 
-        # Omitimos renombrar "FECHA" porque tu Excel ya tiene esa columna para otra cosa.
-        rename_map = {
-            "GENERACION": "GENERACIO",
-            "FECHA_GENERACION": "GENERACIO"
-        }
-        df = df.rename(columns=rename_map)
-        
-        # 4. Asegurar nuevamente que no haya columnas duplicadas tras el renombre
-        is_duplicated_after = df.columns.duplicated(keep='first')
-        df = df.loc[:, ~is_duplicated_after]
-
-        # =========================
-        # VALIDACIÓN
-        # =========================
-        columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
-
-        if not columnas_requeridas.issubset(df.columns):
-            st.error("❌ El archivo no tiene las columnas necesarias")
-            st.write("Detectadas:", df.columns.tolist())
-            st.write("Requeridas:", list(columnas_requeridas))
+        if not dfs:
+            st.error("❌ Ninguno de los archivos subidos contenía datos válidos.")
             return
 
-        # =========================
-        # LIMPIEZA DE DATOS
-        # =========================
-        df = df.dropna(subset=["PROVEEDOR"])
-
-        df["PROVEEDOR"] = df["PROVEEDOR"].astype(str).str.strip()
-        df["GENERACIO"] = pd.to_datetime(df["GENERACIO"], errors="coerce")
-        df["VENCIMIENTO"] = pd.to_datetime(df["VENCIMIENTO"], errors="coerce")
-        df["VALOR"] = pd.to_numeric(df["VALOR"], errors="coerce")
-
-        df = df.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
-
-        # =========================
-        # SELECCIÓN PROVEEDOR
-        # =========================
-        proveedores = sorted(df["PROVEEDOR"].unique())
-
-        proveedor_sel = st.selectbox(
-            "📌 Selecciona un Proveedor:",
-            ["-- Selecciona --"] + proveedores
-        )
-
-        if proveedor_sel == "-- Selecciona --":
-            return
-
-        df_prov = df[df["PROVEEDOR"] == proveedor_sel].copy()
+        # 3. UNIFICAR TODOS LOS ARCHIVOS
+        df_all = pd.concat(dfs, ignore_index=True)
         hoy = pd.Timestamp.today().normalize()
 
-        # =========================
-        # MÉTRICAS
-        # =========================
-        df_prov["DIAS_CREDITO"] = (df_prov["VENCIMIENTO"] - df_prov["GENERACIO"]).dt.days
-        df_prov["VENCIDA"] = df_prov["VENCIMIENTO"] < hoy
-        df_prov["DIAS_VENCIDA"] = (hoy - df_prov["VENCIMIENTO"]).dt.days.clip(lower=0)
+        # Cálculos de fechas y estados globales
+        df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m') # Ej: '2026-03'
+        df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
+        df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
+        df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
+        df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
+        # Próximo a vencer: Entre 1 y 7 días a futuro
+        df_all["PROXIMO_A_VENCER"] = (df_all["DIAS_PARA_VENCER"] >= 1) & (df_all["DIAS_PARA_VENCER"] <= 7)
 
-        def clasificar(row):
-            if not row["VENCIDA"]:
-                return "🟢 Al día"
-            elif row["DIAS_VENCIDA"] <= 30:
-                return "🟠 Vencida reciente"
-            else:
-                return "🔴 Vencida crítica"
+        st.markdown("---")
+        
+        # 4. FILTRO DE MESES
+        st.subheader("📅 Rango de Análisis")
+        meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
+        meses_sel = st.multiselect("Selecciona los meses a analizar:", opciones=meses_disponibles, default=meses_disponibles)
+        
+        if not meses_sel:
+            st.warning("Selecciona al menos un mes para ver datos.")
+            return
 
-        df_prov["RIESGO"] = df_prov.apply(clasificar, axis=1)
-
-        # KPIs
-        total_facturas = len(df_prov)
-        valor_total = df_prov["VALOR"].sum()
-        valor_vencido = df_prov.loc[df_prov["VENCIDA"], "VALOR"].sum()
-        porcentaje_vencido = valor_vencido / valor_total if valor_total > 0 else 0
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("📄 # Facturas", total_facturas)
-        col2.metric("💰 Total", f"${valor_total:,.0f}")
-        col3.metric("⚠️ Vencido", f"${valor_vencido:,.0f}")
-        col4.metric("📉 % Vencido", f"{porcentaje_vencido:.1%}")
+        df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
 
         # =========================
-        # ALERTAS
+        # DASHBOARD INICIAL (Global de los meses seleccionados)
         # =========================
-        if valor_vencido > 0:
-            if porcentaje_vencido > 0.4:
-                st.error("🚨 Riesgo alto: más del 40% está vencido")
-            elif porcentaje_vencido > 0.2:
-                st.warning("⚠️ Riesgo medio")
-            else:
-                st.info("ℹ️ Bajo control")
-        else:
-            st.success("✅ Sin vencimientos")
-            
-        # Revisión de negociación a 30 días
-        alerta_30_vencidas = df_prov[(df_prov["DIAS_CREDITO"] == 30) & df_prov["VENCIDA"]]
-        if not alerta_30_vencidas.empty:
-            st.error("⚠️ **Crédito 30 días, revisar negociación con el proveedor.** \n\n *(El sistema detectó facturas vencidas pactadas a 30 días de crédito).*")
+        st.subheader("🌐 Resumen de Cartera (Meses seleccionados)")
+
+        saldo_total = df_filtrado["VALOR"].sum()
+        saldo_vencido = df_filtrado[df_filtrado["VENCIDA"]]["VALOR"].sum()
+        saldo_sin_vencer = df_filtrado[~df_filtrado["VENCIDA"]]["VALOR"].sum()
+        saldo_proximo = df_filtrado[df_filtrado["PROXIMO_A_VENCER"]]["VALOR"].sum()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("💰 Saldo Total", f"${saldo_total:,.0f}")
+        c2.metric("🟢 Saldo Sin Vencer", f"${saldo_sin_vencer:,.0f}")
+        c3.metric("🔴 Saldo Vencido", f"${saldo_vencido:,.0f}")
+        c4.metric("🟠 Próximo a Vencer (1-7 días)", f"${saldo_proximo:,.0f}")
+
+        # Gráfico del Dashboard Inicial
+        fig, ax = plt.subplots(figsize=(10, 4))
+        categorias = ["Total", "Sin Vencer", "Vencido", "Próx. a Vencer"]
+        valores = [saldo_total, saldo_sin_vencer, saldo_vencido, saldo_proximo]
+        colores = ["#4A90E2", "#50E3C2", "#E15554", "#F5A623"]
+
+        bars = ax.bar(categorias, valores, color=colores, alpha=0.85)
+        ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax.set_title("Distribución de Saldos (General)", fontsize=14)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        # Agregar las etiquetas de valor encima de cada barra
+        for bar in bars:
+            yval = bar.get_height()
+            if yval > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, yval, f'${yval:,.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+        st.pyplot(fig, clear_figure=True)
+
+        st.markdown("---")
 
         # =========================
-        # RESUMEN CRÉDITO
+        # ANÁLISIS AGRUPADO POR PROVEEDORES
         # =========================
-        st.subheader("📊 Distribución por días de crédito")
+        st.subheader("📌 Análisis por Grupo de Proveedores")
+        proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
 
-        resumen = (
-            df_prov.groupby("DIAS_CREDITO")
-            .agg(
-                facturas=("FACTURA", "count"),
-                valor_total=("VALOR", "sum"),
-                vencidas=("VENCIDA", "sum")
+        proveedores_sel = st.multiselect(
+            "Selecciona uno o varios proveedores para agrupar (Ej. Proveedores de chatarra):",
+            opciones=proveedores_disponibles
+        )
+
+        if proveedores_sel:
+            df_prov = df_filtrado[df_filtrado["PROVEEDOR"].isin(proveedores_sel)].copy()
+
+            # Cálculos del grupo seleccionado
+            p_total = df_prov["VALOR"].sum()
+            p_vencido = df_prov[df_prov["VENCIDA"]]["VALOR"].sum()
+            p_sin_vencer = df_prov[~df_prov["VENCIDA"]]["VALOR"].sum()
+            p_proximo = df_prov[df_prov["PROXIMO_A_VENCER"]]["VALOR"].sum()
+
+            st.write(f"**Resumen del grupo seleccionado ({len(proveedores_sel)} proveedores):**")
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Compra del periodo", f"${p_total:,.0f}")
+            p2.metric("Saldo sin vencer", f"${p_sin_vencer:,.0f}")
+            p3.metric("Saldo vencido", f"${p_vencido:,.0f}")
+            p4.metric("Saldo por vencer (1-7d)", f"${p_proximo:,.0f}")
+
+            # Alerta dinámica: Vencidas y con crédito MENOR a 60 días
+            alerta_60_vencidas = df_prov[(df_prov["DIAS_CREDITO"] < 60) & df_prov["VENCIDA"]]
+            if not alerta_60_vencidas.empty:
+                st.error("⚠️ **Atención: Hay facturas vencidas con crédito menor a 60 días en este grupo.** \n\n *(Revisar negociación con los proveedores correspondientes).*")
+
+            # Riesgo visual
+            def clasificar(row):
+                if not row["VENCIDA"]:
+                    return "🟢 Al día"
+                elif row["DIAS_VENCIDA"] <= 30:
+                    return "🟠 Vencida reciente"
+                else:
+                    return "🔴 Vencida crítica"
+
+            df_prov["RIESGO"] = df_prov.apply(clasificar, axis=1)
+
+            st.write("**Detalle de facturas activas del grupo:**")
+            columnas_mostrar = [
+                "PROVEEDOR", "FACTURA", "VALOR", "GENERACIO", "VENCIMIENTO",
+                "DIAS_CREDITO", "DIAS_VENCIDA", "RIESGO"
+            ]
+
+            st.dataframe(
+                df_prov[columnas_mostrar]
+                .sort_values(["PROVEEDOR", "VENCIMIENTO"])
+                .style.format({
+                    "VALOR": "${:,.2f}",
+                    "GENERACIO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else "",
+                    "VENCIMIENTO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else ""
+                }),
+                use_container_width=True
             )
-            .reset_index()
-        )
-
-        st.dataframe(resumen, use_container_width=True)
-
-        # =========================
-        # DETALLE
-        # =========================
-        st.subheader(f"📋 Detalle - {proveedor_sel}")
-
-        columnas_mostrar = [
-            "FACTURA", "VALOR", "GENERACIO", "VENCIMIENTO",
-            "DIAS_CREDITO", "DIAS_VENCIDA", "RIESGO"
-        ]
-
-        if "ESTADO" in df.columns:
-            columnas_mostrar.append("ESTADO")
-
-        # Aplicamos un formato de moneda visual a la columna VALOR
-        st.dataframe(
-            df_prov[columnas_mostrar]
-            .sort_values("VENCIMIENTO")
-            .style.format({
-                "VALOR": "${:,.2f}",
-                "GENERACIO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else "",
-                "VENCIMIENTO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else ""
-            }),
-            use_container_width=True
-        )
+        else:
+            st.info("💡 Selecciona proveedores en la casilla de arriba para ver su detalle agrupado.")
 
     except Exception as e:
-        st.error(f"❌ Error procesando el archivo: {e}")
+        st.error(f"❌ Error procesando los archivos: {e}")
 
 
 # =========================
@@ -816,6 +806,4 @@ def main():
         app_facturas_compras()
         
 if __name__ == "__main__":
-        main()
-
-        
+    main()
