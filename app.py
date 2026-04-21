@@ -361,7 +361,7 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
     return detalle_diario
 
 # =========================
-# EXPORTACIÓN Y GRÁFICOS (Conservados íntegramente de tu código)
+# EXPORTACIÓN Y GRÁFICOS
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -641,19 +641,29 @@ def app_facturas_compras():
                 st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
                 continue
 
+            # ==========================================
+            # FILTRO ESTRICTO: ELIMINAR SIN GENERACIÓN
+            # ==========================================
+            # Eliminar las que definitivamente vienen nulas de pandas
+            df_temp = df_temp.dropna(subset=["GENERACIO"])
+            # Eliminar las que vienen como texto vacío (espacios en blanco)
+            df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
+
             # Limpieza de datos básica
             df_temp = df_temp.dropna(subset=["PROVEEDOR"])
             df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
             df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce")
             df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce")
             df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
+            
+            # Último barrido para asegurar que se formaron fechas y valores reales
             df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
             
             # Añadir a la lista de DataFrames
             dfs.append(df_temp)
 
         if not dfs:
-            st.error("❌ Ninguno de los archivos subidos contenía datos válidos.")
+            st.error("❌ Ninguno de los archivos subidos contenía datos válidos tras limpiar los registros sin fecha.")
             return
 
         # 3. UNIFICAR TODOS LOS ARCHIVOS
