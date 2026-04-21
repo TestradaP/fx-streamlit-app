@@ -930,7 +930,7 @@ def app_flujo_caja():
     # Formatear la tabla final para que se vea como dinero
     st.dataframe(
         df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"})
-             .applymap(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']),
+             .map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']),
         use_container_width=True
     )
 
