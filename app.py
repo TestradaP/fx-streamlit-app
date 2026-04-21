@@ -223,7 +223,7 @@ def asignar_trm_factura(df_facturas: pd.DataFrame, df_trm: pd.DataFrame) -> pd.D
 
 
 # =========================
-# CÁLCULOS
+# CÁLCULOS DIFERENCIA CAMBIO
 # =========================
 def validar_monetizaciones_vs_facturas(df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame) -> pd.DataFrame:
     if df_monetizaciones.empty:
@@ -363,7 +363,7 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
     return detalle_diario
 
 # =========================
-# EXPORTACIÓN Y GRÁFICOS
+# EXPORTACIÓN Y GRÁFICOS (DIFERENCIA CAMBIO)
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -496,8 +496,9 @@ def fig_factura_individual(serie_factura, factura, dif_total_actual, dif_dia_bas
     fig.tight_layout(rect=[0, 0.06, 1, 1])
     return fig
 
+
 # =========================
-# APP 1: DIFERENCIA EN CAMBIO 
+# APP 1: DIFERENCIA EN CAMBIO (Main App)
 # =========================
 def app_diferencia_cambio():
     st.title("Diferencia en cambio - cartera en USD")
@@ -626,7 +627,7 @@ def procesar_compras_dataframe(compras_files):
         df_temp = df_temp.dropna(subset=["PROVEEDOR"])
         df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
         
-        # Formato Latino
+        # Formato Latino (dayfirst=True)
         df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
         df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
         df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
@@ -803,7 +804,13 @@ def cargar_datos_manuales():
     if os.path.exists("flujo_caja_manual.json"):
         with open("flujo_caja_manual.json", "r") as f:
             return json.load(f)
-    return {"saldo_inicial": 0, "S1": {"extra": 0, "fijos": 0, "nomina": 0}, "S2": {"extra": 0, "fijos": 0, "nomina": 0}, "S3": {"extra": 0, "fijos": 0, "nomina": 0}, "S4": {"extra": 0, "fijos": 0, "nomina": 0}}
+    return {
+        "saldo_inicial": 0, 
+        "S1": {"ordinarios": 0, "extra": 0, "fijos": 0, "nomina": 0}, 
+        "S2": {"ordinarios": 0, "extra": 0, "fijos": 0, "nomina": 0}, 
+        "S3": {"ordinarios": 0, "extra": 0, "fijos": 0, "nomina": 0}, 
+        "S4": {"ordinarios": 0, "extra": 0, "fijos": 0, "nomina": 0}
+    }
 
 def guardar_datos_manuales(data):
     with open("flujo_caja_manual.json", "w") as f:
@@ -813,7 +820,6 @@ def app_flujo_caja():
     st.title("💸 Flujo de Caja a 4 Semanas")
     st.markdown("Proyección de ingresos en USD (convertidos a COP) y egresos por pagos a proveedores.")
 
-    # Determinar si es Lunes o Martes (0=Lunes, 1=Martes)
     hoy_dt = pd.Timestamp.today()
     es_dia_edicion = hoy_dt.weekday() in [0, 1]
 
@@ -837,7 +843,6 @@ def app_flujo_caja():
         st.info("Sube al menos Cuentas por Cobrar en USD y un archivo de Compras en COP para ver la proyección.")
         return
 
-    # Procesar USD
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
     df_trm = descargar_trm_historica(df_usd["fecha_factura"].min().normalize(), hoy_dt.normalize())
@@ -847,31 +852,26 @@ def app_flujo_caja():
     
     saldo_vivo_usd_total = resumen_usd['saldo_vivo_actual_usd'].sum()
     saldo_vivo_cop_total = saldo_vivo_usd_total * trm_hoy
-    ingreso_semanal_usd_cop = saldo_vivo_cop_total * 0.20  # EL 20% REGLAMENTARIO
+    ingreso_semanal_usd_cop = saldo_vivo_cop_total * 0.20 
 
-    # Procesar Compras (COP)
     df_compras = procesar_compras_dataframe(f_compras)
-    
     semanas = obtener_semanas_fc()
     
-    # Calcular salidas por AP para cada semana
     ap_semanas = [0, 0, 0, 0]
     if not df_compras.empty:
-        # Semana 1: Incluye todo lo VENCIDO (fecha < start) + lo que vence en esta semana 1
         ap_semanas[0] = df_compras[df_compras['VENCIMIENTO'] <= semanas[0]['end']]['VALOR'].sum()
         ap_semanas[1] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[1]['start']) & (df_compras['VENCIMIENTO'] <= semanas[1]['end'])]['VALOR'].sum()
         ap_semanas[2] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[2]['start']) & (df_compras['VENCIMIENTO'] <= semanas[2]['end'])]['VALOR'].sum()
         ap_semanas[3] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[3]['start']) & (df_compras['VENCIMIENTO'] <= semanas[3]['end'])]['VALOR'].sum()
 
-    # Cargar/Guardar datos manuales
     data_manual = cargar_datos_manuales()
 
     st.markdown("### 2. Variables del Flujo (COP)")
     
     with st.form("form_flujo"):
-        saldo_bancos = st.number_input("Saldo Actual en Bancos (COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
+        saldo_bancos = st.number_input("Saldo Inicial en Bancos (Ahorro COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
         
-        st.markdown("**Proyección de 4 Semanas**")
+        st.markdown("**Proyección Manual a 4 Semanas**")
         cols = st.columns(4)
         nuevos_datos = {}
         
@@ -879,16 +879,15 @@ def app_flujo_caja():
             clave_s = f"S{i+1}"
             with col:
                 st.write(f"**{semanas[i]['label']}**")
-                # El 20% automático no se edita, se muestra
                 st.caption(f"Ingreso Cartera (20%): ${ingreso_semanal_usd_cop:,.0f}")
                 st.caption(f"CxP Proveedores: ${ap_semanas[i]:,.0f}")
                 
-                # Campos manuales
-                ing_ex = st.number_input(f"Ingresos Extra", value=float(data_manual[clave_s]["extra"]), key=f"ex_{i}", disabled=not puede_editar)
-                g_fijos = st.number_input(f"Gastos Fijos", value=float(data_manual[clave_s]["fijos"]), key=f"gf_{i}", disabled=not puede_editar)
-                nom = st.number_input(f"Nómina/Seg", value=float(data_manual[clave_s]["nomina"]), key=f"nom_{i}", disabled=not puede_editar)
+                ing_ord = st.number_input(f"Ing. Ordinarios", value=float(data_manual[clave_s].get("ordinarios", 0)), key=f"ord_{i}", disabled=not puede_editar)
+                ing_ex = st.number_input(f"Ingresos Extra", value=float(data_manual[clave_s].get("extra", 0)), key=f"ex_{i}", disabled=not puede_editar)
+                g_fijos = st.number_input(f"Gastos Fijos", value=float(data_manual[clave_s].get("fijos", 0)), key=f"gf_{i}", disabled=not puede_editar)
+                nom = st.number_input(f"Nómina/Seg", value=float(data_manual[clave_s].get("nomina", 0)), key=f"nom_{i}", disabled=not puede_editar)
                 
-                nuevos_datos[clave_s] = {"extra": ing_ex, "fijos": g_fijos, "nomina": nom}
+                nuevos_datos[clave_s] = {"ordinarios": ing_ord, "extra": ing_ex, "fijos": g_fijos, "nomina": nom}
 
         submit = st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar)
         if submit:
@@ -907,8 +906,14 @@ def app_flujo_caja():
 
     for i in range(4):
         clave_s = f"S{i+1}"
-        ingresos_totales = ingreso_semanal_usd_cop + data_manual[clave_s]["extra"]
-        egresos_totales = ap_semanas[i] + data_manual[clave_s]["fijos"] + data_manual[clave_s]["nomina"]
+        
+        ing_ord_val = data_manual[clave_s].get("ordinarios", 0)
+        ing_ex_val = data_manual[clave_s].get("extra", 0)
+        gf_val = data_manual[clave_s].get("fijos", 0)
+        nom_val = data_manual[clave_s].get("nomina", 0)
+        
+        ingresos_totales = ingreso_semanal_usd_cop + ing_ord_val + ing_ex_val
+        egresos_totales = ap_semanas[i] + gf_val + nom_val
         flujo_neto = ingresos_totales - egresos_totales
         saldo_final = saldo_actual + flujo_neto
         
@@ -916,10 +921,11 @@ def app_flujo_caja():
             "Semana": semanas[i]['label'],
             "Saldo Inicial": saldo_actual,
             "+ Cartera USD (20%)": ingreso_semanal_usd_cop,
-            "+ Ingresos Extra": data_manual[clave_s]["extra"],
+            "+ Ing. Ordinarios": ing_ord_val,
+            "+ Ingresos Extra": ing_ex_val,
             "- CxP Proveedores": ap_semanas[i],
-            "- Gastos Fijos": data_manual[clave_s]["fijos"],
-            "- Nómina": data_manual[clave_s]["nomina"],
+            "- Gastos Fijos": gf_val,
+            "- Nómina": nom_val,
             "FLUJO NETO": flujo_neto,
             "SALDO FINAL": saldo_final
         })
@@ -927,12 +933,45 @@ def app_flujo_caja():
 
     df_fc = pd.DataFrame(tabla_fc)
     
-    # Formatear la tabla final para que se vea como dinero
     st.dataframe(
         df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"})
              .map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']),
         use_container_width=True
     )
+
+    # =========================
+    # GRÁFICA COMBINADA
+    # =========================
+    st.markdown("### 4. Gráfica de Flujo de Caja")
+    
+    fig_fc, ax_fc = plt.subplots(figsize=(12, 5))
+    
+    x_labels = [row["Semana"] for row in tabla_fc]
+    netos = [row["FLUJO NETO"] for row in tabla_fc]
+    saldos = [row["SALDO FINAL"] for row in tabla_fc]
+    
+    colores_barras = ["#50E3C2" if val >= 0 else "#E15554" for val in netos]
+    
+    bars = ax_fc.bar(x_labels, netos, color=colores_barras, alpha=0.8, label="Flujo Neto")
+    ax_fc.axhline(0, color='black', linewidth=1.2)
+    ax_fc.set_ylabel("Flujo Neto (COP)", fontweight='bold')
+    ax_fc.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+    ax_fc.spines['top'].set_visible(False)
+    
+    ax_saldo = ax_fc.twinx()
+    ax_saldo.plot(x_labels, saldos, color="#4A90E2", marker="o", linewidth=3, markersize=8, label="Saldo Final (Liquidez)")
+    ax_saldo.set_ylabel("Saldo Final Acumulado (COP)", color="#4A90E2", fontweight='bold')
+    ax_saldo.tick_params(axis="y", labelcolor="#4A90E2")
+    ax_saldo.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+    ax_saldo.spines['top'].set_visible(False)
+    
+    lines_1, labels_1 = ax_fc.get_legend_handles_labels()
+    lines_2, labels_2 = ax_saldo.get_legend_handles_labels()
+    ax_fc.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
+    
+    plt.title("Evolución del Flujo Neto Semanal vs Saldo en Bancos", fontsize=14, pad=15)
+    fig_fc.tight_layout()
+    st.pyplot(fig_fc, clear_figure=True)
 
 
 # =========================
