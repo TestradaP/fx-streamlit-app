@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from io import BytesIO
 
 import matplotlib.pyplot as plt
@@ -494,9 +496,8 @@ def fig_factura_individual(serie_factura, factura, dif_total_actual, dif_dia_bas
     fig.tight_layout(rect=[0, 0.06, 1, 1])
     return fig
 
-
 # =========================
-# APP 1: DIFERENCIA EN CAMBIO (Tu app original)
+# APP 1: DIFERENCIA EN CAMBIO 
 # =========================
 def app_diferencia_cambio():
     st.title("Diferencia en cambio - cartera en USD")
@@ -597,18 +598,48 @@ def app_diferencia_cambio():
 
 
 # =========================
-# APP 2: FACTURAS DE COMPRAS (Versión Dashboard Multicarga)
+# APP 2: FACTURAS DE COMPRAS
 # =========================
+def procesar_compras_dataframe(compras_files):
+    if not compras_files: return pd.DataFrame()
+    dfs = []
+    for file in compras_files:
+        df_temp = pd.read_excel(file, header=0, engine="openpyxl")
+        
+        if isinstance(df_temp.columns, pd.MultiIndex):
+            df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
+            
+        df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
+        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+        
+        rename_map = {"GENERACION": "GENERACIO", "FECHA_GENERACION": "GENERACIO"}
+        df_temp = df_temp.rename(columns=rename_map)
+        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
 
-# =========================
-# APP 2: FACTURAS DE COMPRAS (Desglose de Cartera)
-# =========================
+        columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
+        if not columnas_requeridas.issubset(df_temp.columns):
+            st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
+            continue
+
+        df_temp = df_temp.dropna(subset=["GENERACIO"])
+        df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
+        df_temp = df_temp.dropna(subset=["PROVEEDOR"])
+        df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
+        
+        # Formato Latino
+        df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
+        df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
+        df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
+        df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
+        dfs.append(df_temp)
+    
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
 
 def app_facturas_compras():
     st.title("📊 Dashboard de Facturas de Compras")
     st.markdown("Sube uno o varios archivos (ej. por mes) para analizar el estado financiero general y por grupos de proveedores.")
 
-    # 1. PERMITIR MÚLTIPLES ARCHIVOS
     compras_files = st.file_uploader(
         "Archivo(s) de Facturas de Compras",
         type=["xlsx", "xlsm", "xls"],
@@ -621,55 +652,13 @@ def app_facturas_compras():
         return
 
     try:
-        dfs = []
-        # 2. PROCESAR CADA ARCHIVO SUBIDO
-        for file in compras_files:
-            df_temp = pd.read_excel(file, header=0, engine="openpyxl")
-            
-            if isinstance(df_temp.columns, pd.MultiIndex):
-                df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
-            
-            # Limpieza segura de columnas
-            df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
-            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
-            
-            rename_map = {
-                "GENERACION": "GENERACIO",
-                "FECHA_GENERACION": "GENERACIO"
-            }
-            df_temp = df_temp.rename(columns=rename_map)
-            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+        df_all = procesar_compras_dataframe(compras_files)
 
-            columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
-            if not columnas_requeridas.issubset(df_temp.columns):
-                st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
-                continue
-
-            # Filtro estricto: eliminar filas sin fecha de generación
-            df_temp = df_temp.dropna(subset=["GENERACIO"])
-            df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
-
-            # Limpieza de datos básica
-            df_temp = df_temp.dropna(subset=["PROVEEDOR"])
-            df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
-            
-            # FORMATO LATINO: dayfirst=True
-            df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
-            df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
-            
-            df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
-            df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
-            
-            dfs.append(df_temp)
-
-        if not dfs:
+        if df_all.empty:
             st.error("❌ Ninguno de los archivos subidos contenía datos válidos tras limpiar los registros sin fecha.")
             return
 
-        # 3. UNIFICAR TODOS LOS ARCHIVOS Y CALCULAR MÉTRICAS GLOBALES
-        df_all = pd.concat(dfs, ignore_index=True)
         hoy = pd.Timestamp.today().normalize()
-
         df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
         df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
         df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
@@ -677,24 +666,18 @@ def app_facturas_compras():
         df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
         df_all["PROXIMO_A_VENCER"] = (df_all["DIAS_PARA_VENCER"] >= 1) & (df_all["DIAS_PARA_VENCER"] <= 7)
 
-        # Nueva función de clasificación estructurada para todo el dashboard
         def clasificar_riesgo(row):
             if row["VENCIDA"]:
-                if row["DIAS_VENCIDA"] > 30:
-                    return "🔴 Vencida Crítica (>30d)"
-                else:
-                    return "🟠 Vencida Reciente (1-30d)"
+                if row["DIAS_VENCIDA"] > 30: return "🔴 Vencida Crítica (>30d)"
+                else: return "🟠 Vencida Reciente (1-30d)"
             else:
-                if row["PROXIMO_A_VENCER"]:
-                    return "🟡 Próximo a Vencer (1-7d)"
-                else:
-                    return "🟢 Al día (>7d)"
+                if row["PROXIMO_A_VENCER"]: return "🟡 Próximo a Vencer (1-7d)"
+                else: return "🟢 Al día (>7d)"
 
         df_all["RIESGO"] = df_all.apply(clasificar_riesgo, axis=1)
 
         st.markdown("---")
         
-        # 4. FILTRO DE MESES
         st.subheader("📅 Rango de Análisis")
         meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
         meses_sel = st.multiselect("Selecciona los meses a analizar:", options=meses_disponibles, default=meses_disponibles)
@@ -705,9 +688,6 @@ def app_facturas_compras():
 
         df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
 
-        # =========================
-        # DASHBOARD INICIAL (Global)
-        # =========================
         st.subheader("🌐 Resumen de Cartera (Meses seleccionados)")
 
         saldo_total = df_filtrado["VALOR"].sum()
@@ -723,7 +703,6 @@ def app_facturas_compras():
         c4.metric("🟠 Venc. Reciente", f"${saldo_venc_reciente:,.0f}")
         c5.metric("🔴 Venc. Crítica", f"${saldo_venc_critico:,.0f}")
 
-        # Gráfico del Dashboard Inicial Actualizado
         fig, ax = plt.subplots(figsize=(12, 4))
         categorias = ["Total", "Al día", "Próx. a Vencer", "Venc. Reciente", "Venc. Crítica"]
         valores = [saldo_total, saldo_al_dia, saldo_proximo, saldo_venc_reciente, saldo_venc_critico]
@@ -744,9 +723,6 @@ def app_facturas_compras():
 
         st.markdown("---")
 
-        # =========================
-        # ANÁLISIS AGRUPADO POR PROVEEDORES
-        # =========================
         st.subheader("📌 Análisis por Grupo de Proveedores")
         proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
 
@@ -772,14 +748,12 @@ def app_facturas_compras():
             p4.metric("Venc. Reciente", f"${p_venc_reciente:,.0f}")
             p5.metric("Venc. Crítica", f"${p_venc_critico:,.0f}")
 
-            # Alerta dinámica actualizada (menor a 60 días y VENCIDA)
             alerta_60_vencidas = df_prov[(df_prov["DIAS_CREDITO"] < 60) & df_prov["VENCIDA"]]
             if not alerta_60_vencidas.empty:
                 st.error("⚠️ **Atención: Hay facturas vencidas con crédito menor a 60 días en este grupo.** \n\n *(Revisar negociación con los proveedores correspondientes).*")
 
             st.write("**Detalle de facturas activas del grupo:**")
             
-            # FILTRO DINÁMICO PARA LA TABLA DE DETALLES
             riesgos_grupo = sorted(df_prov["RIESGO"].unique())
             riesgos_sel = st.multiselect(
                 "🔍 Filtrar tabla por Estado de Riesgo:",
@@ -812,23 +786,173 @@ def app_facturas_compras():
 
 
 # =========================
+# APP 3: FLUJO DE CAJA
+# =========================
+def obtener_semanas_fc():
+    hoy = pd.Timestamp.today().normalize()
+    lunes = hoy - pd.Timedelta(days=hoy.weekday())
+    semanas = []
+    for i in range(4):
+        start = lunes + pd.Timedelta(days=7*i)
+        end = start + pd.Timedelta(days=6)
+        label = f"Sem {i+1} ({start.strftime('%d/%m')} - {end.strftime('%d/%m')})"
+        semanas.append({"idx": i, "start": start, "end": end, "label": label})
+    return semanas
+
+def cargar_datos_manuales():
+    if os.path.exists("flujo_caja_manual.json"):
+        with open("flujo_caja_manual.json", "r") as f:
+            return json.load(f)
+    return {"saldo_inicial": 0, "S1": {"extra": 0, "fijos": 0, "nomina": 0}, "S2": {"extra": 0, "fijos": 0, "nomina": 0}, "S3": {"extra": 0, "fijos": 0, "nomina": 0}, "S4": {"extra": 0, "fijos": 0, "nomina": 0}}
+
+def guardar_datos_manuales(data):
+    with open("flujo_caja_manual.json", "w") as f:
+        json.dump(data, f)
+
+def app_flujo_caja():
+    st.title("💸 Flujo de Caja a 4 Semanas")
+    st.markdown("Proyección de ingresos en USD (convertidos a COP) y egresos por pagos a proveedores.")
+
+    # Determinar si es Lunes o Martes (0=Lunes, 1=Martes)
+    hoy_dt = pd.Timestamp.today()
+    es_dia_edicion = hoy_dt.weekday() in [0, 1]
+
+    col1, col2 = st.columns(2)
+    with col1: st.info(f"📅 Hoy es: **{hoy_dt.strftime('%A, %d de %B')}**")
+    with col2: 
+        forzar_edicion = st.checkbox("⚙️ Forzar Edición (Modo Admin)")
+
+    puede_editar = es_dia_edicion or forzar_edicion
+
+    if not puede_editar:
+        st.warning("🔒 **Modo Lectura Activo:** El Flujo de Caja solo se puede actualizar los días Lunes y Martes.")
+
+    st.markdown("### 1. Carga de Archivos Base")
+    colA, colB, colC = st.columns(3)
+    with colA: f_usd = st.file_uploader("Cuentas por Cobrar (USD)", type=["xlsx"])
+    with colB: m_usd = st.file_uploader("Monetizaciones (USD)", type=["xlsx"])
+    with colC: f_compras = st.file_uploader("Cuentas por Pagar (COP)", type=["xlsx", "xlsm"], accept_multiple_files=True)
+
+    if not (f_usd and f_compras):
+        st.info("Sube al menos Cuentas por Cobrar en USD y un archivo de Compras en COP para ver la proyección.")
+        return
+
+    # Procesar USD
+    df_usd = cargar_facturas(f_usd)
+    df_mon = cargar_monetizaciones(m_usd)
+    df_trm = descargar_trm_historica(df_usd["fecha_factura"].min().normalize(), hoy_dt.normalize())
+    df_usd = asignar_trm_factura(df_usd, df_trm)
+    trm_hoy = float(df_trm["trm"].iloc[-1])
+    resumen_usd = calcular_resumen_actual(df_usd, df_mon, trm_hoy, trm_hoy, 0.0)
+    
+    saldo_vivo_usd_total = resumen_usd['saldo_vivo_actual_usd'].sum()
+    saldo_vivo_cop_total = saldo_vivo_usd_total * trm_hoy
+    ingreso_semanal_usd_cop = saldo_vivo_cop_total * 0.20  # EL 20% REGLAMENTARIO
+
+    # Procesar Compras (COP)
+    df_compras = procesar_compras_dataframe(f_compras)
+    
+    semanas = obtener_semanas_fc()
+    
+    # Calcular salidas por AP para cada semana
+    ap_semanas = [0, 0, 0, 0]
+    if not df_compras.empty:
+        # Semana 1: Incluye todo lo VENCIDO (fecha < start) + lo que vence en esta semana 1
+        ap_semanas[0] = df_compras[df_compras['VENCIMIENTO'] <= semanas[0]['end']]['VALOR'].sum()
+        ap_semanas[1] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[1]['start']) & (df_compras['VENCIMIENTO'] <= semanas[1]['end'])]['VALOR'].sum()
+        ap_semanas[2] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[2]['start']) & (df_compras['VENCIMIENTO'] <= semanas[2]['end'])]['VALOR'].sum()
+        ap_semanas[3] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[3]['start']) & (df_compras['VENCIMIENTO'] <= semanas[3]['end'])]['VALOR'].sum()
+
+    # Cargar/Guardar datos manuales
+    data_manual = cargar_datos_manuales()
+
+    st.markdown("### 2. Variables del Flujo (COP)")
+    
+    with st.form("form_flujo"):
+        saldo_bancos = st.number_input("Saldo Actual en Bancos (COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
+        
+        st.markdown("**Proyección de 4 Semanas**")
+        cols = st.columns(4)
+        nuevos_datos = {}
+        
+        for i, col in enumerate(cols):
+            clave_s = f"S{i+1}"
+            with col:
+                st.write(f"**{semanas[i]['label']}**")
+                # El 20% automático no se edita, se muestra
+                st.caption(f"Ingreso Cartera (20%): ${ingreso_semanal_usd_cop:,.0f}")
+                st.caption(f"CxP Proveedores: ${ap_semanas[i]:,.0f}")
+                
+                # Campos manuales
+                ing_ex = st.number_input(f"Ingresos Extra", value=float(data_manual[clave_s]["extra"]), key=f"ex_{i}", disabled=not puede_editar)
+                g_fijos = st.number_input(f"Gastos Fijos", value=float(data_manual[clave_s]["fijos"]), key=f"gf_{i}", disabled=not puede_editar)
+                nom = st.number_input(f"Nómina/Seg", value=float(data_manual[clave_s]["nomina"]), key=f"nom_{i}", disabled=not puede_editar)
+                
+                nuevos_datos[clave_s] = {"extra": ing_ex, "fijos": g_fijos, "nomina": nom}
+
+        submit = st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar)
+        if submit:
+            data_manual["saldo_inicial"] = saldo_bancos
+            data_manual.update(nuevos_datos)
+            guardar_datos_manuales(data_manual)
+            st.success("¡Datos guardados correctamente!")
+
+    # =========================
+    # TABLA FINAL DE FLUJO DE CAJA
+    # =========================
+    st.markdown("### 3. Resultado Flujo de Caja")
+    
+    tabla_fc = []
+    saldo_actual = data_manual.get("saldo_inicial", 0)
+
+    for i in range(4):
+        clave_s = f"S{i+1}"
+        ingresos_totales = ingreso_semanal_usd_cop + data_manual[clave_s]["extra"]
+        egresos_totales = ap_semanas[i] + data_manual[clave_s]["fijos"] + data_manual[clave_s]["nomina"]
+        flujo_neto = ingresos_totales - egresos_totales
+        saldo_final = saldo_actual + flujo_neto
+        
+        tabla_fc.append({
+            "Semana": semanas[i]['label'],
+            "Saldo Inicial": saldo_actual,
+            "+ Cartera USD (20%)": ingreso_semanal_usd_cop,
+            "+ Ingresos Extra": data_manual[clave_s]["extra"],
+            "- CxP Proveedores": ap_semanas[i],
+            "- Gastos Fijos": data_manual[clave_s]["fijos"],
+            "- Nómina": data_manual[clave_s]["nomina"],
+            "FLUJO NETO": flujo_neto,
+            "SALDO FINAL": saldo_final
+        })
+        saldo_actual = saldo_final
+
+    df_fc = pd.DataFrame(tabla_fc)
+    
+    # Formatear la tabla final para que se vea como dinero
+    st.dataframe(
+        df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"})
+             .applymap(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']),
+        use_container_width=True
+    )
+
+
+# =========================
 # MENÚ PRINCIPAL
 # =========================
 def main():
     st.sidebar.title("Navegación")
-
     app_seleccionada = st.sidebar.radio(
         "¿Qué aplicación quieres utilizar?",
-        ("Diferencia en cambio", "Revisar facturas de compras")
+        ("Diferencia en cambio", "Revisar facturas de compras", "Flujo de Caja a 4 Semanas")
     )
     
     st.sidebar.markdown("---")
     
     if app_seleccionada == "Diferencia en cambio":
         app_diferencia_cambio()
-
     elif app_seleccionada == "Revisar facturas de compras":
         app_facturas_compras()
+    elif app_seleccionada == "Flujo de Caja a 4 Semanas":
+        app_flujo_caja()
         
 if __name__ == "__main__":
     main()
