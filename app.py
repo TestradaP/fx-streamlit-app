@@ -674,7 +674,7 @@ def app_facturas_compras():
         # 4. FILTRO DE MESES
         st.subheader("📅 Rango de Análisis")
         meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
-        meses_sel = st.multiselect("Selecciona los meses a analizar:", opciones=meses_disponibles, default=meses_disponibles)
+        meses_sel = st.multiselect("Selecciona los meses a analizar:", options=meses_disponibles, default=meses_disponibles)
         
         if not meses_sel:
             st.warning("Selecciona al menos un mes para ver datos.")
@@ -728,7 +728,7 @@ def app_facturas_compras():
 
         proveedores_sel = st.multiselect(
             "Selecciona uno o varios proveedores para agrupar (Ej. Proveedores de chatarra):",
-            opciones=proveedores_disponibles
+            options=proveedores_disponibles
         )
 
         if proveedores_sel:
