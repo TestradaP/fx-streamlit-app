@@ -600,11 +600,15 @@ def app_diferencia_cambio():
 # APP 2: FACTURAS DE COMPRAS (Versión Dashboard Multicarga)
 # =========================
 
+# =========================
+# APP 2: FACTURAS DE COMPRAS (Desglose de Cartera)
+# =========================
+
 def app_facturas_compras():
     st.title("📊 Dashboard de Facturas de Compras")
     st.markdown("Sube uno o varios archivos (ej. por mes) para analizar el estado financiero general y por grupos de proveedores.")
 
-    # 1. PERMITIR MÚLTIPLES ARCHIVOS (accept_multiple_files=True)
+    # 1. PERMITIR MÚLTIPLES ARCHIVOS
     compras_files = st.file_uploader(
         "Archivo(s) de Facturas de Compras",
         type=["xlsx", "xlsm", "xls"],
@@ -641,43 +645,52 @@ def app_facturas_compras():
                 st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
                 continue
 
-            # ==========================================
-            # FILTRO ESTRICTO: ELIMINAR SIN GENERACIÓN
-            # ==========================================
-            # Eliminar las que definitivamente vienen nulas de pandas
+            # Filtro estricto: eliminar filas sin fecha de generación
             df_temp = df_temp.dropna(subset=["GENERACIO"])
-            # Eliminar las que vienen como texto vacío (espacios en blanco)
             df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
 
             # Limpieza de datos básica
             df_temp = df_temp.dropna(subset=["PROVEEDOR"])
             df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
-            df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce")
-            df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce")
-            df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
             
-            # Último barrido para asegurar que se formaron fechas y valores reales
+            # FORMATO LATINO: dayfirst=True
+            df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
+            df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
+            
+            df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
             df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
             
-            # Añadir a la lista de DataFrames
             dfs.append(df_temp)
 
         if not dfs:
             st.error("❌ Ninguno de los archivos subidos contenía datos válidos tras limpiar los registros sin fecha.")
             return
 
-        # 3. UNIFICAR TODOS LOS ARCHIVOS
+        # 3. UNIFICAR TODOS LOS ARCHIVOS Y CALCULAR MÉTRICAS GLOBALES
         df_all = pd.concat(dfs, ignore_index=True)
         hoy = pd.Timestamp.today().normalize()
 
-        # Cálculos de fechas y estados globales
-        df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m') # Ej: '2026-03'
+        df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
         df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
         df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
         df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
         df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
-        # Próximo a vencer: Entre 1 y 7 días a futuro
         df_all["PROXIMO_A_VENCER"] = (df_all["DIAS_PARA_VENCER"] >= 1) & (df_all["DIAS_PARA_VENCER"] <= 7)
+
+        # Nueva función de clasificación estructurada para todo el dashboard
+        def clasificar_riesgo(row):
+            if row["VENCIDA"]:
+                if row["DIAS_VENCIDA"] > 30:
+                    return "🔴 Vencida Crítica (>30d)"
+                else:
+                    return "🟠 Vencida Reciente (1-30d)"
+            else:
+                if row["PROXIMO_A_VENCER"]:
+                    return "🟡 Próximo a Vencer (1-7d)"
+                else:
+                    return "🟢 Al día (>7d)"
+
+        df_all["RIESGO"] = df_all.apply(clasificar_riesgo, axis=1)
 
         st.markdown("---")
         
@@ -693,34 +706,35 @@ def app_facturas_compras():
         df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
 
         # =========================
-        # DASHBOARD INICIAL (Global de los meses seleccionados)
+        # DASHBOARD INICIAL (Global)
         # =========================
         st.subheader("🌐 Resumen de Cartera (Meses seleccionados)")
 
         saldo_total = df_filtrado["VALOR"].sum()
-        saldo_vencido = df_filtrado[df_filtrado["VENCIDA"]]["VALOR"].sum()
-        saldo_sin_vencer = df_filtrado[~df_filtrado["VENCIDA"]]["VALOR"].sum()
-        saldo_proximo = df_filtrado[df_filtrado["PROXIMO_A_VENCER"]]["VALOR"].sum()
+        saldo_al_dia = df_filtrado[df_filtrado["RIESGO"] == "🟢 Al día (>7d)"]["VALOR"].sum()
+        saldo_proximo = df_filtrado[df_filtrado["RIESGO"] == "🟡 Próximo a Vencer (1-7d)"]["VALOR"].sum()
+        saldo_venc_reciente = df_filtrado[df_filtrado["RIESGO"] == "🟠 Vencida Reciente (1-30d)"]["VALOR"].sum()
+        saldo_venc_critico = df_filtrado[df_filtrado["RIESGO"] == "🔴 Vencida Crítica (>30d)"]["VALOR"].sum()
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("💰 Saldo Total", f"${saldo_total:,.0f}")
-        c2.metric("🟢 Saldo Sin Vencer", f"${saldo_sin_vencer:,.0f}")
-        c3.metric("🔴 Saldo Vencido", f"${saldo_vencido:,.0f}")
-        c4.metric("🟠 Próximo a Vencer (1-7 días)", f"${saldo_proximo:,.0f}")
+        c2.metric("🟢 Al Día", f"${saldo_al_dia:,.0f}")
+        c3.metric("🟡 Próx. Vencer", f"${saldo_proximo:,.0f}")
+        c4.metric("🟠 Venc. Reciente", f"${saldo_venc_reciente:,.0f}")
+        c5.metric("🔴 Venc. Crítica", f"${saldo_venc_critico:,.0f}")
 
-        # Gráfico del Dashboard Inicial
-        fig, ax = plt.subplots(figsize=(10, 4))
-        categorias = ["Total", "Sin Vencer", "Vencido", "Próx. a Vencer"]
-        valores = [saldo_total, saldo_sin_vencer, saldo_vencido, saldo_proximo]
-        colores = ["#4A90E2", "#50E3C2", "#E15554", "#F5A623"]
+        # Gráfico del Dashboard Inicial Actualizado
+        fig, ax = plt.subplots(figsize=(12, 4))
+        categorias = ["Total", "Al día", "Próx. a Vencer", "Venc. Reciente", "Venc. Crítica"]
+        valores = [saldo_total, saldo_al_dia, saldo_proximo, saldo_venc_reciente, saldo_venc_critico]
+        colores = ["#4A90E2", "#50E3C2", "#F5A623", "#F57C00", "#E15554"]
 
         bars = ax.bar(categorias, valores, color=colores, alpha=0.85)
         ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
-        ax.set_title("Distribución de Saldos (General)", fontsize=14)
+        ax.set_title("Distribución de Saldos por Edades (General)", fontsize=14)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        # Agregar las etiquetas de valor encima de cada barra
         for bar in bars:
             yval = bar.get_height()
             if yval > 0:
@@ -744,44 +758,45 @@ def app_facturas_compras():
         if proveedores_sel:
             df_prov = df_filtrado[df_filtrado["PROVEEDOR"].isin(proveedores_sel)].copy()
 
-            # Cálculos del grupo seleccionado
             p_total = df_prov["VALOR"].sum()
-            p_vencido = df_prov[df_prov["VENCIDA"]]["VALOR"].sum()
-            p_sin_vencer = df_prov[~df_prov["VENCIDA"]]["VALOR"].sum()
-            p_proximo = df_prov[df_prov["PROXIMO_A_VENCER"]]["VALOR"].sum()
+            p_al_dia = df_prov[df_prov["RIESGO"] == "🟢 Al día (>7d)"]["VALOR"].sum()
+            p_proximo = df_prov[df_prov["RIESGO"] == "🟡 Próximo a Vencer (1-7d)"]["VALOR"].sum()
+            p_venc_reciente = df_prov[df_prov["RIESGO"] == "🟠 Vencida Reciente (1-30d)"]["VALOR"].sum()
+            p_venc_critico = df_prov[df_prov["RIESGO"] == "🔴 Vencida Crítica (>30d)"]["VALOR"].sum()
 
             st.write(f"**Resumen del grupo seleccionado ({len(proveedores_sel)} proveedores):**")
-            p1, p2, p3, p4 = st.columns(4)
-            p1.metric("Compra del periodo", f"${p_total:,.0f}")
-            p2.metric("Saldo sin vencer", f"${p_sin_vencer:,.0f}")
-            p3.metric("Saldo vencido", f"${p_vencido:,.0f}")
-            p4.metric("Saldo por vencer (1-7d)", f"${p_proximo:,.0f}")
+            p1, p2, p3, p4, p5 = st.columns(5)
+            p1.metric("Total Grupo", f"${p_total:,.0f}")
+            p2.metric("Al día", f"${p_al_dia:,.0f}")
+            p3.metric("Próx. Vencer", f"${p_proximo:,.0f}")
+            p4.metric("Venc. Reciente", f"${p_venc_reciente:,.0f}")
+            p5.metric("Venc. Crítica", f"${p_venc_critico:,.0f}")
 
-            # Alerta dinámica: Vencidas y con crédito MENOR a 60 días
+            # Alerta dinámica actualizada (menor a 60 días y VENCIDA)
             alerta_60_vencidas = df_prov[(df_prov["DIAS_CREDITO"] < 60) & df_prov["VENCIDA"]]
             if not alerta_60_vencidas.empty:
                 st.error("⚠️ **Atención: Hay facturas vencidas con crédito menor a 60 días en este grupo.** \n\n *(Revisar negociación con los proveedores correspondientes).*")
 
-            # Riesgo visual
-            def clasificar(row):
-                if not row["VENCIDA"]:
-                    return "🟢 Al día"
-                elif row["DIAS_VENCIDA"] <= 30:
-                    return "🟠 Vencida reciente"
-                else:
-                    return "🔴 Vencida crítica"
-
-            df_prov["RIESGO"] = df_prov.apply(clasificar, axis=1)
-
             st.write("**Detalle de facturas activas del grupo:**")
+            
+            # FILTRO DINÁMICO PARA LA TABLA DE DETALLES
+            riesgos_grupo = sorted(df_prov["RIESGO"].unique())
+            riesgos_sel = st.multiselect(
+                "🔍 Filtrar tabla por Estado de Riesgo:",
+                options=riesgos_grupo,
+                default=riesgos_grupo
+            )
+            
+            df_mostrar = df_prov[df_prov["RIESGO"].isin(riesgos_sel)]
+
             columnas_mostrar = [
                 "PROVEEDOR", "FACTURA", "VALOR", "GENERACIO", "VENCIMIENTO",
                 "DIAS_CREDITO", "DIAS_VENCIDA", "RIESGO"
             ]
 
             st.dataframe(
-                df_prov[columnas_mostrar]
-                .sort_values(["PROVEEDOR", "VENCIMIENTO"])
+                df_mostrar[columnas_mostrar]
+                .sort_values(["RIESGO", "VENCIMIENTO"])
                 .style.format({
                     "VALOR": "${:,.2f}",
                     "GENERACIO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else "",
