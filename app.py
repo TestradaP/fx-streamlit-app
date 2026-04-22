@@ -12,7 +12,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 
 # =========================
-# CONFIGURACIÓN DE PÁGINA (Debe ser el primer comando)
+# CONFIGURACIÓN DE PÁGINA
 # =========================
 st.set_page_config(page_title="Dashboard Financiero Pro", layout="wide")
 
@@ -337,6 +337,7 @@ def construir_saldos_diarios(
     monetizaciones_por_factura = {f: g.sort_values("fecha") for f, g in df_monetizaciones.groupby("factura")} if not df_monetizaciones.empty else {}
 
     for _, fila in df_facturas.iterrows():
+        # Ignorar facturas sin fecha en la serie de tiempo
         if pd.isna(fila["fecha_factura"]):
             continue
 
@@ -413,9 +414,8 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
     detalle_diario["dif_dia_base"] = detalle_diario["dif_no_realizada"].diff().fillna(0)
     return detalle_diario
 
-
 # =========================
-# EXPORTACIÓN Y GRÁFICOS (DIFERENCIA CAMBIO)
+# EXPORTACIÓN Y GRÁFICOS
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -557,17 +557,14 @@ def fig_factura_individual(serie_factura, factura, dif_total_actual, dif_dia_bas
 # =========================
 # APP 1: DIFERENCIA EN CAMBIO (Pestaña)
 # =========================
-def app_diferencia_cambio():
+def app_diferencia_cambio(facturas_file, monetizaciones_file):
     st.title("Diferencia en cambio - cartera en USD")
-    st.markdown("Sube los archivos y ejecuta el cálculo.")
+    st.markdown("Analiza la volatilidad de tu cartera en USD.")
 
     spread = st.sidebar.number_input(
         "Spread bancario para escenarios del día",
         min_value=0.0, max_value=0.20, value=SPREAD_POR_DEFECTO, step=0.005, format="%.3f",
     )
-
-    facturas_file = st.file_uploader("Facturas abiertas", type=["xlsx"], key="facturas")
-    monetizaciones_file = st.file_uploader("Monetizaciones", type=["xlsx"], key="monetizaciones")
 
     if facturas_file is not None:
         try:
@@ -675,7 +672,7 @@ def app_diferencia_cambio():
         except Exception as e:
             st.error(f"Error: {e}")
     else:
-        st.info("Sube al menos el archivo de facturas para comenzar.")
+        st.info("👈 Sube el archivo de Cuentas por Cobrar (CxC USD) en la barra lateral para comenzar.")
 
 
 # =========================
@@ -717,19 +714,12 @@ def procesar_compras_dataframe(compras_files):
     
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-def app_facturas_compras():
+def app_facturas_compras(compras_files):
     st.title("📊 Dashboard de Facturas de Compras")
     st.markdown("Analiza tus proveedores y genera tu archivo de pagos a realizar.")
 
-    compras_files = st.file_uploader(
-        "Archivo(s) de Facturas de Compras",
-        type=["xlsx", "xlsm", "xls"],
-        key="compras_app_files",
-        accept_multiple_files=True
-    )
-
     if not compras_files:
-        st.info("👆 Sube tus archivos Excel para comenzar el análisis.")
+        st.info("👈 Sube tus archivos de Cuentas por Pagar (CxP COP) en la barra lateral para comenzar.")
         return
 
     try:
@@ -935,7 +925,7 @@ def guardar_datos_manuales(data):
     with open("flujo_caja_manual.json", "w") as f:
         json.dump(data, f)
 
-def app_flujo_caja():
+def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     st.title("💸 Flujo de Caja a 4 Semanas")
     st.markdown("Proyección de ingresos en USD (convertidos a COP) y egresos por pagos a proveedores.")
 
@@ -952,15 +942,8 @@ def app_flujo_caja():
     if not puede_editar:
         st.warning("🔒 **Modo Lectura Activo:** El Flujo de Caja solo se puede actualizar los días Lunes y Martes.")
 
-    st.markdown("### 1. Carga de Archivos Base")
-    colA, colB, colC, colD = st.columns(4)
-    with colA: f_usd = st.file_uploader("CxC (USD)", type=["xlsx"])
-    with colB: m_usd = st.file_uploader("Monetizaciones", type=["xlsx"])
-    with colC: f_compras = st.file_uploader("CxP (COP) [Múltiples]", type=["xlsx", "xlsm"], accept_multiple_files=True)
-    with colD: f_pagos = st.file_uploader("Pagos Realizados (Conciliación)", type=["xlsx", "xlsm"], accept_multiple_files=True)
-
     if not (f_usd and f_compras):
-        st.info("Sube al menos Cuentas por Cobrar en USD y un archivo de Compras en COP para ver la proyección.")
+        st.info("👈 Sube los archivos de CxC (USD) y CxP (COP) en la barra lateral para ver la proyección.")
         return
 
     # Procesar Ingresos USD
@@ -1303,13 +1286,20 @@ def main():
     )
     
     st.sidebar.markdown("---")
+    st.sidebar.subheader("📂 Archivos Globales")
+    st.sidebar.write("Sube aquí tus bases de datos. Se mantendrán cargadas para todos los módulos sin borrarse.")
+    
+    f_usd = st.sidebar.file_uploader("1. CxC (USD)", type=["xlsx"], key="g_cxc")
+    m_usd = st.sidebar.file_uploader("2. Monetizaciones (USD)", type=["xlsx"], key="g_mon")
+    f_compras = st.sidebar.file_uploader("3. CxP (COP) [Múltiples]", type=["xlsx", "xlsm"], accept_multiple_files=True, key="g_cxp")
+    f_pagos = st.sidebar.file_uploader("4. Pagos Realizados", type=["xlsx", "xlsm"], accept_multiple_files=True, key="g_pag")
     
     if app_seleccionada == "Diferencia en cambio":
-        app_diferencia_cambio()
+        app_diferencia_cambio(f_usd, m_usd)
     elif app_seleccionada == "Revisar facturas de compras":
-        app_facturas_compras()
+        app_facturas_compras(f_compras)
     elif app_seleccionada == "Flujo de Caja a 4 Semanas":
-        app_flujo_caja()
+        app_flujo_caja(f_usd, m_usd, f_compras, f_pagos)
     elif app_seleccionada == "Endeudamiento y CAPEX":
         app_endeudamiento_capex()
     elif app_seleccionada == "Simulador Estratégico CCC":
