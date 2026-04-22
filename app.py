@@ -762,6 +762,7 @@ def app_simulador_ccc():
     r2.metric("Venta Promedio Diaria", f"${ventas_diarias:,.0f}")
     r3.metric("💰 Capital de Trabajo Liberado", f"${caja_liberada:,.0f}")
 
+
 # =========================
 # APP 6: RESUMEN EJECUTIVO (PDF)
 # =========================
@@ -863,19 +864,50 @@ def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
 # =========================
 def limpiar_y_extraer_ultimo_numero(val):
     if pd.isna(val): return None
+    
+    # 1. Si pandas ya lo leyó como número, no tocamos nada
+    if isinstance(val, (int, float)):
+        return float(val)
+        
     s = str(val).strip()
     if not any(c.isdigit() for c in s): return None
     
-    # Separar por espacios o símbolos de peso por si el Excel unió varias columnas en una
+    # 2. Separar por espacios si hay múltiples valores (ej. "$ 100 $ 200")
     partes = s.replace("$", " ").replace("\n", " ").split()
     for parte in reversed(partes):
         if any(c.isdigit() for c in parte):
-            # Limpiar formato colombiano: 8.029.923.801,00 -> 8029923801.00
-            p = parte.replace(".", "")
-            if "," in p: p = p.replace(",", ".")
-            p = ''.join(c for c in p if c.isdigit() or c == '.')
-            try: return float(p)
-            except ValueError: continue
+            p = parte
+            
+            # Lógica de limpieza según formato
+            if "." in p and "," in p:
+                # Formato mixto: 1.234.567,89 o 1,234,567.89
+                ultimo_punto = p.rfind(".")
+                ultima_coma = p.rfind(",")
+                if ultima_coma > ultimo_punto:
+                    # Colombia: 1.234.567,89
+                    p = p.replace(".", "").replace(",", ".")
+                else:
+                    # USA: 1,234,567.89
+                    p = p.replace(",", "")
+            elif "," in p:
+                # Solo comas: 1,234,567 o 1234,56
+                if p.count(",") == 1 and len(p.split(",")[1]) <= 2:
+                    p = p.replace(",", ".") # Decimal
+                else:
+                    p = p.replace(",", "") # Miles
+            elif "." in p:
+                # Solo puntos: 1.234.567 o 1234.56
+                if p.count(".") > 1 or len(p.split(".")[1]) == 3:
+                    p = p.replace(".", "") # Miles
+                else:
+                    pass # Decimal, se deja igual
+                    
+            # Eliminar cualquier otro caracter que no sea número, punto o signo menos
+            p = ''.join(c for c in p if c.isdigit() or c == '.' or c == '-')
+            try: 
+                return float(p)
+            except ValueError: 
+                continue
     return None
 
 def app_analisis_financiero():
@@ -914,7 +946,7 @@ def app_analisis_financiero():
                             if valores[key] == 0.0:
                                 for kw in kw_list:
                                     if kw in row_str:
-                                        # Buscar el número de derecha a izquierda (para sacar el año más reciente)
+                                        # Buscar el número de derecha a izquierda
                                         for val in reversed(row.values):
                                             numero = limpiar_y_extraer_ultimo_numero(val)
                                             if numero is not None:
