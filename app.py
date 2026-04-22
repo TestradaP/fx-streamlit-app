@@ -686,9 +686,6 @@ def guardar_datos_manuales(data):
     with open("flujo_caja_manual.json", "w") as f: json.dump(data, f)
 
 def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
-    # (Aquí sigue tu código normal que dice st.title("💸 Flujo de Caja a 4 Semanas")...)
-
-def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     st.title("💸 Flujo de Caja a 4 Semanas")
     hoy_dt = pd.Timestamp.today()
     es_dia_edicion = hoy_dt.weekday() in [0, 1]
