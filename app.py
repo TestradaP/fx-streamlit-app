@@ -668,6 +668,26 @@ def app_facturas_compras(compras_files):
 # =========================
 # MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
 # =========================
+
+# =========================
+# MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
+# =========================
+def obtener_semanas_fc():
+    hoy = pd.Timestamp.today().normalize()
+    lunes = hoy - pd.Timedelta(days=hoy.weekday())
+    return [{"idx": i, "start": lunes + pd.Timedelta(days=7*i), "end": lunes + pd.Timedelta(days=7*i+6), "label": f"Sem {i+1} ({ (lunes + pd.Timedelta(days=7*i)).strftime('%d/%m')} - { (lunes + pd.Timedelta(days=7*i+6)).strftime('%d/%m')})"} for i in range(4)]
+
+def cargar_datos_manuales():
+    if os.path.exists("flujo_caja_manual.json"):
+        with open("flujo_caja_manual.json", "r") as f: return json.load(f)
+    return {"saldo_inicial": 0, "S1": {}, "S2": {}, "S3": {}, "S4": {}}
+
+def guardar_datos_manuales(data):
+    with open("flujo_caja_manual.json", "w") as f: json.dump(data, f)
+
+def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
+    # (Aquí sigue tu código normal que dice st.title("💸 Flujo de Caja a 4 Semanas")...)
+
 def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     st.title("💸 Flujo de Caja a 4 Semanas")
     hoy_dt = pd.Timestamp.today()
