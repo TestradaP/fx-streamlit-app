@@ -962,56 +962,113 @@ def app_analisis_financiero(eeff_files):
 # =========================
 # MÓDULO 7: RESUMEN EJECUTIVO (SUPER PDF)
 # =========================
-def generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp) -> bytes:
+def generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp, ccc_data, flujo_data) -> bytes:
     if FPDF is None: return None
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
     
-    # PORTADA
+    # --- PORTADA Y ENCABEZADO ---
     pdf.add_page()
+    pdf.set_fill_color(41, 128, 185) # Azul Corporativo
+    pdf.rect(0, 0, 210, 25, 'F')
     pdf.set_font("Arial", 'B', 20)
+    pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 15, "REPORTE GERENCIAL CONSOLIDADO", 0, 1, 'C')
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, f"Fecha de emision: {pd.Timestamp.today().strftime('%Y-%m-%d')}", 0, 1, 'C')
+    pdf.set_font("Arial", 'I', 11)
+    pdf.cell(0, 5, f"Generado el: {pd.Timestamp.today().strftime('%Y-%m-%d')}", 0, 1, 'C')
     pdf.ln(10)
     
-    # SECCIÓN 1: KPIS CONTABLES
+    pdf.set_text_color(0, 0, 0) # Volver a texto negro
+
+    # --- FUNCIÓN AUXILIAR PARA TABLAS ---
+    def crear_fila_tabla(concepto, valor, fondo=False):
+        pdf.set_font("Arial", 'B' if fondo else '', 10)
+        if fondo: 
+            pdf.set_fill_color(240, 240, 240)
+        pdf.cell(120, 8, f"  {concepto}", 1, 0, 'L', fill=fondo)
+        pdf.cell(70, 8, f"{valor}  ", 1, 1, 'R', fill=fondo)
+
+    # --- 1. PANORAMA FINANCIERO ---
+    pdf.set_font("Arial", 'B', 14)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, "1. SALUD FINANCIERA (NIIF)", 0, 1)
+    pdf.set_text_color(0, 0, 0)
     if kpis_eeff:
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, "1. PANORAMA FINANCIERO (KPIs)", 0, 1)
-        pdf.set_font("Arial", '', 11)
-        pdf.cell(0, 8, f" - Capital de Trabajo: {formato_pesos(kpis_eeff.get('Capital de Trabajo', 0))}", 0, 1)
-        pdf.cell(0, 8, f" - Prueba Acida: {kpis_eeff.get('Prueba Ácida', 0):.2f}x", 0, 1)
-        pdf.cell(0, 8, f" - Nivel Endeudamiento: {kpis_eeff.get('Nivel Endeudamiento', 0)*100:.1f}%", 0, 1)
-        pdf.cell(0, 8, f" - ROE: {kpis_eeff.get('ROE', 0)*100:.1f}% | Margen Neto: {kpis_eeff.get('Margen Neto', 0)*100:.1f}%", 0, 1)
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_fill_color(41, 128, 185)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(120, 8, "Indicador", 1, 0, 'C', 1)
+        pdf.cell(70, 8, "Valor", 1, 1, 'C', 1)
+        pdf.set_text_color(0, 0, 0)
+        
+        crear_fila_tabla("Capital de Trabajo", formato_pesos(kpis_eeff.get('Capital de Trabajo', 0)))
+        crear_fila_tabla("Razón de Liquidez", f"{kpis_eeff.get('Razón Corriente', 0):.2f}x", True)
+        crear_fila_tabla("Prueba Acida", f"{kpis_eeff.get('Prueba Ácida', 0):.2f}x")
+        crear_fila_tabla("Nivel Endeudamiento Total", f"{kpis_eeff.get('Nivel Endeudamiento', 0)*100:.1f}%", True)
+        crear_fila_tabla("Rentabilidad Neta (Margen)", f"{kpis_eeff.get('Margen Neto', 0)*100:.1f}%")
+        crear_fila_tabla("ROE (Retorno Patrimonio)", f"{kpis_eeff.get('ROE', 0)*100:.1f}%", True)
         pdf.ln(5)
 
-    # SECCIÓN 2: RIESGO CAMBIARIO Y OPERATIVO
+    # --- 2. GESTIÓN OPERATIVA Y CICLO DE CAJA ---
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "2. EXPOSICION AL RIESGO Y OPERACION", 0, 1)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 8, f" - Saldo Vivo en USD (Facturado): {formato_pesos(data_fx['total_usd'])} USD", 0, 1)
-    pdf.cell(0, 8, f" - PnL Diferencia en Cambio no Realizada: {formato_pesos(data_fx['pnl_no_realizado'])} COP", 0, 1)
-    pdf.cell(0, 8, f" - Total Cuentas por Pagar (CxP): {formato_pesos(data_cxp['total_cxp'])} COP", 0, 1)
-    pdf.cell(0, 8, f" - Porcentaje de CxP Vencido: {data_cxp['porcentaje_vencido']:.1%}", 0, 1)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, "2. GESTION OPERATIVA Y RIESGOS", 0, 1)
+    pdf.set_text_color(0, 0, 0)
+    
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_fill_color(41, 128, 185)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(120, 8, "Concepto Operativo", 1, 0, 'C', 1)
+    pdf.cell(70, 8, "Estado Actual", 1, 1, 'C', 1)
+    pdf.set_text_color(0, 0, 0)
+
+    # Riesgo Cambiario (CxC)
+    crear_fila_tabla("Cuentas por Cobrar (CxC) Vivo en USD", f"{formato_pesos(data_fx['total_usd'])} USD")
+    crear_fila_tabla("PnL Dif. en Cambio No Realizada", f"{formato_pesos(data_fx['pnl_no_realizado'])} COP", True)
+    
+    # Proveedores (CxP)
+    crear_fila_tabla("Total Cuentas por Pagar (CxP) en COP", f"{formato_pesos(data_cxp['total_cxp'])}")
+    crear_fila_tabla("Porcentaje de CxP Vencido", f"{data_cxp['porcentaje_vencido']:.1%}", True)
+    
+    # CCC & Liquidez
+    crear_fila_tabla("Ciclo de Conversion de Efectivo (CCC)", f"{ccc_data['CCC']:.0f} dias")
+    crear_fila_tabla("Liquidez Inmediata (Saldo en Bancos)", f"{formato_pesos(flujo_data['Saldo Inicial'])}", True)
     pdf.ln(5)
 
-    # SECCIÓN 3: DEUDA Y ESTRATEGIA
+    # --- 3. DEUDA Y FINANCIACIÓN ---
     if not df_deuda.empty:
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, "3. ESTRATEGIA DE FINANCIACION ACTIVA", 0, 1)
-        pdf.set_font("Arial", '', 11)
-        for _, row in df_deuda.iterrows():
-            pdf.cell(0, 8, f" - {row['Tipo']}: Desembolso {formato_pesos(row['Desembolso'])} | Cuota: {formato_pesos(row['Cuota Mensual'])}", 0, 1)
+        pdf.set_text_color(41, 128, 185)
+        pdf.cell(0, 10, "3. ESTRATEGIA DE FINANCIACION CORTA", 0, 1)
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_fill_color(41, 128, 185)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(80, 8, "Instrumento", 1, 0, 'C', 1)
+        pdf.cell(55, 8, "Desembolso Recibido", 1, 0, 'C', 1)
+        pdf.cell(55, 8, "Cuota a Pagar", 1, 1, 'C', 1)
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.set_font("Arial", '', 10)
+        for i, row in df_deuda.iterrows():
+            fondo = (i % 2 == 0)
+            if fondo: pdf.set_fill_color(240, 240, 240)
+            pdf.cell(80, 8, f"  {row['Tipo']}", 1, 0, 'L', fill=fondo)
+            pdf.cell(55, 8, f"{formato_pesos(row['Desembolso'])}  ", 1, 0, 'R', fill=fondo)
+            pdf.cell(55, 8, f"{formato_pesos(row['Cuota Mensual'])}  ", 1, 1, 'R', fill=fondo)
     
-    # PÁGINA DE GRÁFICOS
+    # --- PÁGINA 2: GRÁFICOS ---
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "ANEXOS GRAFICOS", 0, 1, 'C')
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, "ANEXOS GRAFICOS VISUALES", 0, 1, 'C')
+    pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
     
     y_start = pdf.get_y()
     
+    # Guardar gráficas
     t1 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     fig_liq.savefig(t1.name, format="png", bbox_inches="tight")
     t1.close()
@@ -1033,6 +1090,7 @@ def generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_ma
         t3_name = t3.name
         pdf.image(t3_name, x=60, y=y_start + 80, w=90)
 
+    # Salida del PDF
     pdf_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf_name = pdf_file.name
     pdf_file.close()
@@ -1041,26 +1099,24 @@ def generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_ma
     with open(pdf_name, "rb") as f: 
         pdf_bytes = f.read()
         
-    # Limpieza
-    try: os.remove(t1.name)
-    except: pass
-    if t2_name:
-        try: os.remove(t2_name)
-        except: pass
-    if t3_name:
-        try: os.remove(t3_name)
-        except: pass
-    try: os.remove(pdf_name)
-    except: pass
-    
+    # Limpiar temporales
+    for temp_f in [t1.name, t2_name, t3_name, pdf_name]:
+        if temp_f:
+            try: os.remove(temp_f)
+            except: pass
+            
     return pdf_bytes
+
 
 def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     st.title("🗂️ Súper Resumen Ejecutivo (PDF)")
+    st.markdown("Consolida los 6 módulos operativos en un solo reporte tabular de alta gerencia.")
+    
     if not (f_usd and f_compras and eeff_files):
-        st.warning("⚠️ Para el súper reporte, sube en la barra lateral: 1. CxC, 3. CxP y 5. Estados Financieros.")
+        st.warning("⚠️ Para el Súper Reporte, debes subir en la barra lateral: 1. CxC, 3. CxP y 5. Estados Financieros.")
         return
 
+    # 1. Datos FX (CxC)
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
     fecha_inicial = obtener_fecha_inicial_trm(df_usd, df_mon)
@@ -1074,6 +1130,7 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
         "pnl_no_realizado": df_facturadas_usd['dif_no_realizada'].sum()
     }
 
+    # 2. Datos Compras (CxP)
     df_compras = procesar_compras_dataframe(f_compras)
     pasivo_corriente_cxp = df_compras['VALOR'].sum() if not df_compras.empty else 0.0
     pasivo_vencido = df_compras[df_compras['VENCIMIENTO'] < pd.Timestamp.today()]['VALOR'].sum() if not df_compras.empty else 0.0
@@ -1082,18 +1139,36 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
         "porcentaje_vencido": (pasivo_vencido / pasivo_corriente_cxp) if pasivo_corriente_cxp > 0 else 0
     }
 
+    # 3. Datos EEFF y CCC Automático
     valores_eeff = procesar_eeff(eeff_files)
     kpis_eeff = calcular_kpis_completos(valores_eeff)
+    
+    ingresos = valores_eeff.get("Ingresos", 1)
+    costo_venta = valores_eeff.get("Costo de Venta", 1)
+    cxc_totales = valores_eeff.get("Cuentas por Cobrar", 0)
+    inv_totales = valores_eeff.get("Inventarios", 0)
+    
+    # Matemáticas de Ciclo de Caja (Días)
+    dso = (cxc_totales / ingresos) * 360 if ingresos > 0 else 0
+    dio = (inv_totales / costo_venta) * 360 if costo_venta > 0 else 0
+    dpo = (pasivo_corriente_cxp / costo_venta) * 360 if costo_venta > 0 else 0
+    ccc_data = {"DSO": dso, "DIO": dio, "DPO": dpo, "CCC": dio + dso - dpo}
 
+    # 4. Datos Flujo de Caja (Saldo Bancos)
+    data_manual = cargar_datos_manuales()
+    flujo_data = {"Saldo Inicial": float(data_manual.get("saldo_inicial", 0))}
+
+    # 5. Deuda Activa
     deuda_activa = []
     if st.session_state.datos_credito["activo"]:
-        deuda_activa.append({"Tipo": "Crédito Cap. Trabajo", "Desembolso": st.session_state.datos_credito["desembolso"], "Cuota Mensual": st.session_state.datos_credito["cuota"]})
+        deuda_activa.append({"Tipo": "Crédito Capital Trabajo", "Desembolso": st.session_state.datos_credito["desembolso"], "Cuota Mensual": st.session_state.datos_credito["cuota"]})
     if st.session_state.datos_leaseback["activo"]:
-        deuda_activa.append({"Tipo": "Leaseback Operativo", "Desembolso": st.session_state.datos_leaseback["desembolso"], "Cuota Mensual": st.session_state.datos_leaseback["cuota"]})
+        deuda_activa.append({"Tipo": "Leaseback Maquinaria", "Desembolso": st.session_state.datos_leaseback["desembolso"], "Cuota Mensual": st.session_state.datos_leaseback["cuota"]})
     df_deuda = pd.DataFrame(deuda_activa)
 
-    st.success("✅ Todos los módulos integrados. Generando previsualización...")
+    st.success("✅ Cálculos cruzados terminados. Renderizando reporte...")
 
+    # Generación de Gráficos para el PDF
     fig_liq, ax1 = plt.subplots(figsize=(6, 4))
     ax1.bar(["Activo Corriente", "Pasivo Corriente"], [valores_eeff.get("Activo Corriente",0), valores_eeff.get("Pasivo Corriente",0)], color=["#50E3C2", "#E15554"])
     ax1.set_title("Estructura de Liquidez")
@@ -1121,10 +1196,9 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     if FPDF is None:
         st.error("⚠️ Instala la librería ejecutando: `pip install fpdf` en tu terminal, y reinicia streamlit.")
     else:
-        pdf_bytes = generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp)
+        pdf_bytes = generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp, ccc_data, flujo_data)
         if pdf_bytes:
-            st.download_button("📄 Descargar Súper Reporte Gerencial (PDF)", data=pdf_bytes, file_name="Super_Reporte_Gerencial.pdf", mime="application/pdf")
-
+            st.download_button("📄 Descargar Súper Reporte Gerencial Tabular (PDF)", data=pdf_bytes, file_name="Reporte_Junta_Directiva.pdf", mime="application/pdf")
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
