@@ -40,6 +40,7 @@ TRM_API_DATASETS = ["32sa-8pi3", "dit9-nnvp"]
 DATOS_GOV_BASE = "https://www.datos.gov.co/resource"
 SPREAD_POR_DEFECTO = 0.02
 
+
 # =========================
 # FORMATOS Y MATEMÁTICA
 # =========================
@@ -54,7 +55,7 @@ def calcular_cuota_mensual(valor_credito, tasa_ea, meses):
     return valor_credito * (tasa_mensual * (1 + tasa_mensual)**meses) / ((1 + tasa_mensual)**meses - 1)
 
 # =========================
-# CARGA Y VALIDACIÓN DE DATOS (Facturas y Compras)
+# VALIDACIONES Y CARGA (Para Diferencia en Cambio)
 # =========================
 def validar_columnas_facturas(df: pd.DataFrame) -> None:
     req = {"factura", "cliente", "fecha_factura", "moneda", "valor_usd"}
@@ -84,28 +85,6 @@ def cargar_monetizaciones(archivo) -> pd.DataFrame:
     df["monto_usd"] = pd.to_numeric(df["monto_usd"], errors="coerce")
     df["tasa_monetizacion"] = pd.to_numeric(df["tasa_monetizacion"], errors="coerce")
     return df.sort_values(["factura", "fecha"]).reset_index(drop=True)
-
-def procesar_compras_dataframe(compras_files):
-    if not compras_files: return pd.DataFrame()
-    dfs = []
-    for file in compras_files:
-        df_temp = pd.read_excel(file, header=0, engine="openpyxl")
-        if isinstance(df_temp.columns, pd.MultiIndex):
-            df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
-        df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
-        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
-        df_temp = df_temp.rename(columns={"GENERACION": "GENERACIO", "FECHA_GENERACION": "GENERACIO"})
-        if not {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}.issubset(df_temp.columns): continue
-        df_temp = df_temp.dropna(subset=["GENERACIO"])
-        df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
-        df_temp = df_temp.dropna(subset=["PROVEEDOR"])
-        df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
-        df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
-        df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
-        df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
-        df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
-        dfs.append(df_temp)
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 # =========================
 # TRM AUTOMÁTICA
@@ -149,7 +128,7 @@ def asignar_trm_factura(df_facturas: pd.DataFrame, df_trm: pd.DataFrame) -> pd.D
     return pd.concat([df_con, df_sin], ignore_index=True).drop(columns=["fecha_factura_norm"])
 
 # =========================
-# LÓGICA DE CÁLCULO: DIFERENCIA EN CAMBIO
+# CÁLCULOS (Diferencia Cambio)
 # =========================
 def calcular_resumen_actual(df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame, trm_actual: float, trm_ayer: float, spread: float) -> pd.DataFrame:
     registros = []
@@ -170,21 +149,10 @@ def calcular_resumen_actual(df_facturas: pd.DataFrame, df_monetizaciones: pd.Dat
             abono_usd = float(post["monto_usd"].sum()) if not post.empty else 0.0
             saldo = max(float(fila["valor_usd"]) - anticipo_usd - abono_usd, 0.0)
             trm_fac = float(fila["trm_factura"]) if pd.notnull(fila["trm_factura"]) else trm_actual
-            
             dif_anticipos = float(((trm_fac - anticipos["tasa_monetizacion"]) * anticipos["monto_usd"]).sum()) if not anticipos.empty else 0.0
             dif_realizada_post = float(((post["tasa_monetizacion"] - trm_fac) * post["monto_usd"]).sum()) if not post.empty else 0.0
             dif_no_realizada = saldo * (trm_actual - trm_fac)
-            
-            registros.append({
-                "factura": fila["factura"], "cliente": fila["cliente"], "fecha_factura": fecha_factura,
-                "valor_usd": float(fila["valor_usd"]), "trm_factura": trm_fac,
-                "anticipo_previo_total_usd": anticipo_usd, "abonos_post_factura_total_usd": abono_usd,
-                "saldo_vivo_actual_usd": saldo, "dif_anticipos": dif_anticipos, "dif_realizada_post": dif_realizada_post,
-                "dif_no_realizada": dif_no_realizada, "dif_total": dif_anticipos + dif_realizada_post + dif_no_realizada,
-                "dif_dia_base": saldo * (trm_actual - trm_ayer),
-                "dif_dia_plus_2pct": saldo * (trm_actual * (1 + spread) - trm_ayer),
-                "dif_dia_minus_2pct": saldo * (trm_actual * (1 - spread) - trm_ayer)
-            })
+            registros.append({"factura": fila["factura"], "cliente": fila["cliente"], "fecha_factura": fecha_factura, "valor_usd": float(fila["valor_usd"]), "trm_factura": trm_fac, "anticipo_previo_total_usd": anticipo_usd, "abonos_post_factura_total_usd": abono_usd, "saldo_vivo_actual_usd": saldo, "dif_anticipos": dif_anticipos, "dif_realizada_post": dif_realizada_post, "dif_no_realizada": dif_no_realizada, "dif_total": dif_anticipos + dif_realizada_post + dif_no_realizada, "dif_dia_base": saldo * (trm_actual - trm_ayer), "dif_dia_plus_2pct": saldo * (trm_actual * (1 + spread) - trm_ayer), "dif_dia_minus_2pct": saldo * (trm_actual * (1 - spread) - trm_ayer)})
     return pd.DataFrame(registros)
 
 def construir_saldos_diarios(df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame, fechas: pd.Series, fechas_trm_map: pd.Series) -> pd.DataFrame:
@@ -331,7 +299,6 @@ def calcular_kpis_completos(valores):
         "ROE": valores["Utilidad Neta"] / pat
     }
 
-
 # =========================
 # FUNCIONES DE GRÁFICOS (Para Diferencia Cambio y PDF)
 # =========================
@@ -375,14 +342,12 @@ def fig_trm_y_diferencia_total(serie_total, diferencia_total_actual):
     ax1.tick_params(axis="y", labelcolor="tab:blue")
     ax1.yaxis.set_major_formatter(FuncFormatter(formato_pesos_decimales))
     ax1.grid(True, alpha=0.3)
-    
     ax2 = ax1.twinx()
     linea2 = ax2.plot(serie_total["fecha"], serie_total["dif_total"], label="Diferencia total", linestyle="--", linewidth=2.5, color="tab:red", zorder=3)
     ax2.axhline(y=0, linestyle=":", linewidth=1.5, color="black", alpha=0.8)
     ax2.set_ylabel("Diferencia total (COP)", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
-    
     plt.title("TRM y diferencia en cambio total", fontsize=14)
     lineas = linea1 + linea2
     ax1.legend(lineas, [l.get_label() for l in lineas], loc="upper left")
@@ -509,8 +474,6 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
             if not df_facturadas.empty:
                 dif_total_actual = float(df_facturadas["dif_total"].sum())
                 saldo_total_actual_usd = float(df_facturadas["saldo_vivo_actual_usd"].sum())
-                
-                # REPARACIÓN: MÉTRICAS CON SPREAD (+2% y -2%) RESTAURADAS
                 dif_dia_base_total = float(df_facturadas["dif_dia_base"].sum())
                 dif_dia_plus_total = float(df_facturadas["dif_dia_plus_2pct"].sum())
                 dif_dia_minus_total = float(df_facturadas["dif_dia_minus_2pct"].sum())
@@ -574,6 +537,10 @@ def app_facturas_compras(compras_files):
 
     hoy = pd.Timestamp.today().normalize()
     df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
+    
+    # REPARACIÓN: COLUMNA DIAS_CREDITO AÑADIDA
+    df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
+    
     df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
     df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
     df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
@@ -597,15 +564,15 @@ def app_facturas_compras(compras_files):
 
         df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("💰 Saldo Total", f"${df_filtrado['VALOR'].sum():,.0f}")
         c2.metric("🟢 Al Día", f"${df_filtrado[df_filtrado['RIESGO'] == '🟢 Al día (>7d)']['VALOR'].sum():,.0f}")
         c3.metric("🟡 Próx. Vencer", f"${df_filtrado[df_filtrado['RIESGO'] == '🟡 Próximo a Vencer (1-7d)']['VALOR'].sum():,.0f}")
-        c4.metric("🔴 Vencido", f"${df_filtrado[df_filtrado['VENCIDA']]['VALOR'].sum():,.0f}")
+        c4.metric("🟠 Venc. Reciente", f"${df_filtrado[df_filtrado['RIESGO'] == '🟠 Vencida Reciente (1-30d)']['VALOR'].sum():,.0f}")
+        c5.metric("🔴 Venc. Crítica", f"${df_filtrado[df_filtrado['RIESGO'] == '🔴 Vencida Crítica (>30d)']['VALOR'].sum():,.0f}")
 
         st.dataframe(df_filtrado[["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO"]], use_container_width=True)
 
-        # REPARACIÓN: ANÁLISIS POR GRUPO DE PROVEEDORES RESTAURADO
         st.markdown("---")
         st.subheader("📌 Análisis por Grupo de Proveedores")
         proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
@@ -662,19 +629,6 @@ def app_facturas_compras(compras_files):
 # =========================
 # MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
 # =========================
-def obtener_semanas_fc():
-    hoy = pd.Timestamp.today().normalize()
-    lunes = hoy - pd.Timedelta(days=hoy.weekday())
-    return [{"idx": i, "start": lunes + pd.Timedelta(days=7*i), "end": lunes + pd.Timedelta(days=7*i+6), "label": f"Sem {i+1} ({ (lunes + pd.Timedelta(days=7*i)).strftime('%d/%m')} - { (lunes + pd.Timedelta(days=7*i+6)).strftime('%d/%m')})"} for i in range(4)]
-
-def cargar_datos_manuales():
-    if os.path.exists("flujo_caja_manual.json"):
-        with open("flujo_caja_manual.json", "r") as f: return json.load(f)
-    return {"saldo_inicial": 0, "S1": {}, "S2": {}, "S3": {}, "S4": {}}
-
-def guardar_datos_manuales(data):
-    with open("flujo_caja_manual.json", "w") as f: json.dump(data, f)
-
 def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     st.title("💸 Flujo de Caja a 4 Semanas")
     hoy_dt = pd.Timestamp.today()
@@ -743,7 +697,6 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     tabla_fc = []
     saldo_actual = data_manual.get("saldo_inicial", 0)
     
-    # REPARACIÓN: LLAMADO CORRECTO A LA MEMORIA DE DEUDA
     d_cre = st.session_state.get("datos_credito", {"desembolso": 0, "cuota": 0, "activo": False})
     d_lea = st.session_state.get("datos_leaseback", {"desembolso": 0, "cuota": 0, "activo": False})
 
@@ -752,7 +705,6 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
         ing_ord_val = data_manual[clave_s].get("ordinarios", 0)
         ing_ex_val = data_manual[clave_s].get("extra", 0)
         
-        # Desembolso sólo Semana 1
         desembolsos_fin = 0
         if i == 0:
             desembolsos_fin += (d_cre["desembolso"] if d_cre["activo"] else 0)
@@ -761,7 +713,6 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
         gf_val = data_manual[clave_s].get("f_serv", 0) + data_manual[clave_s].get("f_arr", 0) + data_manual[clave_s].get("f_otr", 0)
         nom_val = data_manual[clave_s].get("n_sue", 0) + data_manual[clave_s].get("n_ss", 0)
         
-        # Cuotas en Semana 4
         cuotas_fin = 0
         if i == 3:
             cuotas_fin += (d_cre["cuota"] if d_cre["activo"] else 0)
@@ -789,7 +740,6 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     df_fc = pd.DataFrame(tabla_fc)
     st.dataframe(df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"}).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']), use_container_width=True)
 
-    # REPARACIÓN: GRÁFICA DE FLUJO DE CAJA RESTAURADA
     st.markdown("### 📈 Evolución de Liquidez")
     fig_fc, ax_fc = plt.subplots(figsize=(12, 5))
     x_labels = [row["Semana"] for row in tabla_fc]
@@ -843,7 +793,6 @@ def app_endeudamiento_capex():
         cuota = calcular_cuota_mensual(monto, tasa_final_ea, plazo)
         st.info(f"Desembolso: **${monto:,.0f}** | Cuota: **${cuota:,.0f}**")
         
-        # REPARACIÓN: BOTONES DE LIMPIAR RESTAURADOS
         c_btn1, c_btn2 = st.columns(2)
         with c_btn1:
             if st.button("🚀 Aplicar al Flujo de Caja", key="btn_cre"):
@@ -906,7 +855,6 @@ def app_simulador_ccc():
     r2.metric("Venta Promedio Diaria", f"${ventas_diarias:,.0f}")
     r3.metric("💰 Capital de Trabajo Liberado", f"${caja_liberada:,.0f}")
 
-    # REPARACIÓN: GRÁFICA DE SIMULADOR CCC RESTAURADA
     fig, ax = plt.subplots(figsize=(10, 4))
     categorias = ['Actual', 'Simulado']
     dso_vals = [dso_actual, dso_simulado]
