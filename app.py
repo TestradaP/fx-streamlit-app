@@ -55,7 +55,7 @@ def calcular_cuota_mensual(valor_credito, tasa_ea, meses):
     return valor_credito * (tasa_mensual * (1 + tasa_mensual)**meses) / ((1 + tasa_mensual)**meses - 1)
 
 # =========================
-# VALIDACIONES Y CARGA (Para Diferencia en Cambio)
+# VALIDACIONES Y CARGA (Facturas, Monetizaciones y COMPRAS)
 # =========================
 def validar_columnas_facturas(df: pd.DataFrame) -> None:
     req = {"factura", "cliente", "fecha_factura", "moneda", "valor_usd"}
@@ -85,6 +85,36 @@ def cargar_monetizaciones(archivo) -> pd.DataFrame:
     df["monto_usd"] = pd.to_numeric(df["monto_usd"], errors="coerce")
     df["tasa_monetizacion"] = pd.to_numeric(df["tasa_monetizacion"], errors="coerce")
     return df.sort_values(["factura", "fecha"]).reset_index(drop=True)
+
+# ¡RESTAURADO! Función central para leer las Compras
+def procesar_compras_dataframe(compras_files):
+    if not compras_files: return pd.DataFrame()
+    dfs = []
+    for file in compras_files:
+        df_temp = pd.read_excel(file, header=0, engine="openpyxl")
+        if isinstance(df_temp.columns, pd.MultiIndex):
+            df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
+        df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
+        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+        
+        rename_map = {"GENERACION": "GENERACIO", "FECHA_GENERACION": "GENERACIO"}
+        df_temp = df_temp.rename(columns=rename_map)
+        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+
+        columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
+        if not columnas_requeridas.issubset(df_temp.columns): continue
+
+        df_temp = df_temp.dropna(subset=["GENERACIO"])
+        df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
+        df_temp = df_temp.dropna(subset=["PROVEEDOR"])
+        df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
+        
+        df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
+        df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
+        df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
+        df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
+        dfs.append(df_temp)
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 # =========================
 # TRM AUTOMÁTICA
@@ -126,6 +156,15 @@ def asignar_trm_factura(df_facturas: pd.DataFrame, df_trm: pd.DataFrame) -> pd.D
         df_con = pd.merge_asof(df_con.sort_values("fecha_factura_norm").reset_index(drop=True), trm, left_on="fecha_factura_norm", right_on="fecha", direction="backward").rename(columns={"trm": "trm_factura"}).drop(columns=["fecha"])
     df_sin["trm_factura"] = None
     return pd.concat([df_con, df_sin], ignore_index=True).drop(columns=["fecha_factura_norm"])
+
+# ¡RESTAURADO! Buscador inteligente de fechas para no cortar la gráfica si hay anticipos antiguos
+def obtener_fecha_inicial_trm(df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame) -> pd.Timestamp:
+    min_fac = df_facturas["fecha_factura"].dropna().min()
+    min_mon = df_monetizaciones["fecha"].dropna().min()
+    fechas = pd.Series([min_fac, min_mon]).dropna()
+    if fechas.empty: return pd.Timestamp.today().normalize()
+    return fechas.min().normalize()
+
 
 # =========================
 # CÁLCULOS (Diferencia Cambio)
@@ -204,7 +243,7 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
     return detalle_diario
 
 # =========================
-# LECTURA AVANZADA DE ESTADOS FINANCIEROS (CON CORRECCIÓN DE NÚMEROS)
+# LECTURA AVANZADA DE ESTADOS FINANCIEROS
 # =========================
 def limpiar_y_extraer_ultimo_numero(val):
     if pd.isna(val): return None
@@ -300,7 +339,7 @@ def calcular_kpis_completos(valores):
     }
 
 # =========================
-# FUNCIONES DE GRÁFICOS (Para Diferencia Cambio y PDF)
+# FUNCIONES DE GRÁFICOS
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -342,12 +381,14 @@ def fig_trm_y_diferencia_total(serie_total, diferencia_total_actual):
     ax1.tick_params(axis="y", labelcolor="tab:blue")
     ax1.yaxis.set_major_formatter(FuncFormatter(formato_pesos_decimales))
     ax1.grid(True, alpha=0.3)
+    
     ax2 = ax1.twinx()
     linea2 = ax2.plot(serie_total["fecha"], serie_total["dif_total"], label="Diferencia total", linestyle="--", linewidth=2.5, color="tab:red", zorder=3)
     ax2.axhline(y=0, linestyle=":", linewidth=1.5, color="black", alpha=0.8)
     ax2.set_ylabel("Diferencia total (COP)", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+    
     plt.title("TRM y diferencia en cambio total", fontsize=14)
     lineas = linea1 + linea2
     ax1.legend(lineas, [l.get_label() for l in lineas], loc="upper left")
@@ -445,8 +486,9 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
         try:
             df_facturas = cargar_facturas(facturas_file)
             df_monetizaciones = cargar_monetizaciones(monetizaciones_file)
-            fechas_validas = df_facturas["fecha_factura"].dropna()
-            fecha_inicial = fechas_validas.min().normalize() if not fechas_validas.empty else pd.Timestamp.today().normalize()
+            
+            # ¡REPARADO! Fecha inicial inteligente para graficar desde el primer anticipo
+            fecha_inicial = obtener_fecha_inicial_trm(df_facturas, df_monetizaciones)
             fecha_final = pd.Timestamp.today().normalize()
 
             with st.spinner("Descargando TRM histórica..."):
@@ -537,10 +579,7 @@ def app_facturas_compras(compras_files):
 
     hoy = pd.Timestamp.today().normalize()
     df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
-    
-    # REPARACIÓN: COLUMNA DIAS_CREDITO AÑADIDA
     df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
-    
     df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
     df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
     df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
@@ -645,17 +684,15 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
         st.info("👈 Sube los archivos de CxC (USD) y CxP (COP) en la barra lateral.")
         return
 
-    # Ingresos USD
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
-    fechas_validas = df_usd["fecha_factura"].dropna()
-    df_trm = descargar_trm_historica(fechas_validas.min().normalize() if not fechas_validas.empty else hoy_dt.normalize(), hoy_dt.normalize())
+    fecha_inicial = obtener_fecha_inicial_trm(df_usd, df_mon)
+    df_trm = descargar_trm_historica(fecha_inicial, hoy_dt.normalize())
     df_usd = asignar_trm_factura(df_usd, df_trm)
     trm_hoy = float(df_trm["trm"].iloc[-1])
     resumen_usd = calcular_resumen_actual(df_usd, df_mon, trm_hoy, trm_hoy, 0.0)
     ingreso_semanal_usd_cop = (resumen_usd[resumen_usd["fecha_factura"].notna()]['saldo_vivo_actual_usd'].sum() * trm_hoy) * 0.20 
 
-    # Compras COP y Pagos
     df_compras = procesar_compras_dataframe(f_compras)
     if f_pagos and not df_compras.empty:
         df_pagos_hechos = procesar_compras_dataframe(f_pagos)
@@ -1009,7 +1046,8 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
 
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
-    df_trm = descargar_trm_historica(df_usd["fecha_factura"].dropna().min() if not df_usd["fecha_factura"].dropna().empty else pd.Timestamp.today(), pd.Timestamp.today())
+    fecha_inicial = obtener_fecha_inicial_trm(df_usd, df_mon)
+    df_trm = descargar_trm_historica(fecha_inicial, pd.Timestamp.today().normalize())
     df_usd = asignar_trm_factura(df_usd, df_trm)
     trm_hoy = float(df_trm["trm"].iloc[-1])
     resumen_usd = calcular_resumen_actual(df_usd, df_mon, trm_hoy, trm_hoy, 0.0)
