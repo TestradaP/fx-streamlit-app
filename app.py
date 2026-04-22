@@ -222,42 +222,38 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
 
 
 # =========================
-# LECTURA AVANZADA DE ESTADOS FINANCIEROS (CON CORRECCIÓN DE FLOAT)
+# LECTURA AVANZADA DE ESTADOS FINANCIEROS (CON CORRECCIÓN DE NÚMEROS)
 # =========================
 def limpiar_y_extraer_ultimo_numero(val):
-    if pd.isna(val): 
-        return None
-    # Si pandas ya lo leyó como número real, se respeta tal cual
-    if isinstance(val, (int, float)): 
-        return float(val)
-        
+    if pd.isna(val): return None
+    if isinstance(val, (int, float)): return float(val)
     s = str(val).strip()
-    if not any(c.isdigit() for c in s): 
-        return None
+    if not any(c.isdigit() for c in s): return None
     
     partes = s.replace("$", " ").replace("\n", " ").split()
     for parte in reversed(partes):
         if any(c.isdigit() for c in parte):
             p = parte
-            if "." in p and "," in p:
-                if p.rfind(",") > p.rfind("."): 
-                    p = p.replace(".", "").replace(",", ".")
-                else: 
-                    p = p.replace(",", "")
-            elif "," in p:
-                if p.count(",") == 1 and len(p.split(",")[1]) <= 2: 
-                    p = p.replace(",", ".") 
-                else: 
-                    p = p.replace(",", "") 
-            elif "." in p:
-                if p.count(".") > 1 or len(p.split(".")[1]) == 3: 
-                    p = p.replace(".", "") 
             
-            p = ''.join(c for c in p if c.isdigit() or c == '.' or c == '-')
+            # Chequeo de negativos
+            is_negative = False
+            if "-" in p or ("(" in p and ")" in p):
+                is_negative = True
+                
+            if "." in p and "," in p:
+                if p.rfind(",") > p.rfind("."): p = p.replace(".", "").replace(",", ".")
+                else: p = p.replace(",", "")
+            elif "," in p:
+                if p.count(",") == 1 and len(p.split(",")[1]) <= 2: p = p.replace(",", ".") 
+                else: p = p.replace(",", "") 
+            elif "." in p:
+                if p.count(".") > 1 or len(p.split(".")[1]) == 3: p = p.replace(".", "") 
+            
+            p = ''.join(c for c in p if c.isdigit() or c == '.')
             try: 
-                return float(p)
-            except ValueError: 
-                continue
+                num = float(p)
+                return -num if is_negative else num
+            except ValueError: continue
     return None
 
 def procesar_eeff(eeff_files):
@@ -278,7 +274,6 @@ def procesar_eeff(eeff_files):
         "Gastos Financieros": ["GASTOS FINANCIEROS"],
         "Utilidad Neta": ["UTILIDAD DEL PERIODO", "GANANCIA NETA", "UTILIDAD NETA", "GANANCIA  (PÉRDIDA)"]
     }
-    
     valores = {k: 0.0 for k in keywords}
     if not eeff_files: return valores
 
@@ -327,7 +322,7 @@ def calcular_kpis_completos(valores):
 
 
 # =========================
-# FUNCIONES DE GRÁFICOS (Para Diferencia Cambio y PDF)
+# FUNCIONES DE GRÁFICOS
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -498,30 +493,31 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                 s1.metric("Valor Total Proyectos", f"${df_sin_factura['valor_usd'].sum():,.2f}")
                 s2.metric("Total Pagado (Anticipos)", f"${df_sin_factura['anticipo_previo_total_usd'].sum():,.2f}")
                 s3.metric("Saldo Vivo sin Facturar", f"${df_sin_factura['saldo_vivo_actual_usd'].sum():,.2f}")
+                st.dataframe(df_sin_factura[["factura", "cliente", "valor_usd", "anticipo_previo_total_usd", "saldo_vivo_actual_usd"]], use_container_width=True)
 
             st.markdown("### 📊 Facturación y Diferencia en Cambio")
             if not df_facturadas.empty:
                 dif_total_actual = float(df_facturadas["dif_total"].sum())
                 saldo_total_actual_usd = float(df_facturadas["saldo_vivo_actual_usd"].sum())
-                
-                # REPARACIÓN: MÉTRICAS CON SPREAD (+2% y -2%) RESTAURADAS
+                dif_realizada_total = float((df_facturadas["dif_anticipos"] + df_facturadas["dif_realizada_post"]).sum())
+                dif_no_realizada_total = float(df_facturadas["dif_no_realizada"].sum())
                 dif_dia_base_total = float(df_facturadas["dif_dia_base"].sum())
                 dif_dia_plus_total = float(df_facturadas["dif_dia_plus_2pct"].sum())
                 dif_dia_minus_total = float(df_facturadas["dif_dia_minus_2pct"].sum())
-
+                
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("TRM actual", f"${trm_actual:,.2f}")
                 c2.metric("Saldo vivo total USD", f"${saldo_total_actual_usd:,.2f}")
-                c3.metric("Dif. realizada total", f"${float((df_facturadas['dif_anticipos'] + df_facturadas['dif_realizada_post']).sum()):,.2f}")
-                c4.metric("Dif. no realizada total", f"${float(df_facturadas['dif_no_realizada'].sum()):,.2f}")
+                c3.metric("Dif. realizada total", f"${dif_realizada_total:,.2f}")
+                c4.metric("Dif. no realizada total", f"${dif_no_realizada_total:,.2f}")
 
                 c5, c6, c7 = st.columns(3)
                 c5.metric("Dif. día base", f"${dif_dia_base_total:,.2f}")
                 c6.metric(f"Dif. día +{spread:.1%}", f"${dif_dia_plus_total:,.2f}")
                 c7.metric(f"Dif. día -{spread:.1%}", f"${dif_dia_minus_total:,.2f}")
 
-                tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Gráficas Generales", "Factura Individual", "Descarga"])
-                with tab1: 
+                tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Gráficas Generales", "Factura individual", "Descarga"])
+                with tab1:
                     st.dataframe(df_facturadas, use_container_width=True)
                 with tab2:
                     if not serie_total.empty:
@@ -535,7 +531,7 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                         fila_factura = df_facturadas[df_facturadas["factura"] == factura_sel].iloc[0]
                         col_opt1, col_opt2 = st.columns(2)
                         with col_opt1: mostrar_etiquetas = st.checkbox("Mostrar etiquetas de monetizaciones", value=True)
-                        with col_opt2: umbral_etiqueta_usd = st.number_input("Etiquetar solo movimientos desde USD", min_value=0.0, step=500.0)
+                        with col_opt2: umbral_etiqueta_usd = st.number_input("Etiquetar movimientos > USD", min_value=0.0, step=500.0)
 
                         serie_factura = construir_serie_factura(fila_factura, df_monetizaciones, df_trm)
                         if not serie_factura.empty:
@@ -543,18 +539,40 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                             st.pyplot(fig_factura_individual(serie_factura, factura_sel, float(ultimo["dif_total"]), float(ultimo["dif_dia_base"]), df_monetizaciones, fila_factura, mostrar_etiquetas, umbral_etiqueta_usd), clear_figure=True)
                 with tab4:
                     excel_bytes = exportar_resultados_excel(detalle_actual, serie_total, detalle_diario)
-                    st.download_button("Descargar Excel General", data=excel_bytes, file_name="diferencia_cambio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            else: 
-                st.info("No hay facturas con fecha registrada.")
-        except Exception as e: 
-            st.error(f"Error procesando la información: {e}")
-    else: 
+                    st.download_button("Descargar Excel", data=excel_bytes, file_name="diferencia_cambio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("No hay facturas con fecha registrada para calcular diferencia en cambio.")
+        except Exception as e:
+            st.error(f"Error procesando: {e}")
+    else:
         st.info("👈 Sube Cuentas por Cobrar (CxC USD) en la barra lateral.")
 
 
 # =========================
 # MÓDULO 2: FACTURAS DE COMPRAS Y PAGOS
 # =========================
+def procesar_compras_dataframe(compras_files):
+    if not compras_files: return pd.DataFrame()
+    dfs = []
+    for file in compras_files:
+        df_temp = pd.read_excel(file, header=0, engine="openpyxl")
+        if isinstance(df_temp.columns, pd.MultiIndex):
+            df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
+        df_temp.columns = [str(col).strip().upper().replace(" ", "_") for col in df_temp.columns]
+        df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
+        df_temp = df_temp.rename(columns={"GENERACION": "GENERACIO", "FECHA_GENERACION": "GENERACIO"})
+        if not {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}.issubset(df_temp.columns): continue
+        df_temp = df_temp.dropna(subset=["GENERACIO"])
+        df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
+        df_temp = df_temp.dropna(subset=["PROVEEDOR"])
+        df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
+        df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
+        df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
+        df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
+        df_temp = df_temp.dropna(subset=["GENERACIO", "VENCIMIENTO", "VALOR"])
+        dfs.append(df_temp)
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
 def app_facturas_compras(compras_files):
     st.title("🛒 Dashboard de Facturas de Compras")
     if not compras_files:
@@ -579,26 +597,25 @@ def app_facturas_compras(compras_files):
     df_all["RIESGO"] = df_all.apply(clasificar_riesgo, axis=1)
 
     tab1, tab2 = st.tabs(["📊 Análisis y Dashboard", "💸 Planeador de Pagos"])
-    
     with tab1:
         st.subheader("📅 Rango de Análisis")
         meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
         meses_sel = st.multiselect("Selecciona los meses a analizar:", options=meses_disponibles, default=meses_disponibles)
-        
         if not meses_sel:
             st.warning("Selecciona al menos un mes para ver datos.")
             return
 
         df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("💰 Saldo Total", f"${df_filtrado['VALOR'].sum():,.0f}")
         c2.metric("🟢 Al Día", f"${df_filtrado[df_filtrado['RIESGO'] == '🟢 Al día (>7d)']['VALOR'].sum():,.0f}")
         c3.metric("🟡 Próx. Vencer", f"${df_filtrado[df_filtrado['RIESGO'] == '🟡 Próximo a Vencer (1-7d)']['VALOR'].sum():,.0f}")
-        c4.metric("🔴 Vencido", f"${df_filtrado[df_filtrado['VENCIDA']]['VALOR'].sum():,.0f}")
+        c4.metric("🟠 Venc. Reciente", f"${df_filtrado[df_filtrado['RIESGO'] == '🟠 Vencida Reciente (1-30d)']['VALOR'].sum():,.0f}")
+        c5.metric("🔴 Venc. Crítica", f"${df_filtrado[df_filtrado['RIESGO'] == '🔴 Vencida Crítica (>30d)']['VALOR'].sum():,.0f}")
+
         st.dataframe(df_filtrado[["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO"]], use_container_width=True)
 
-        # REPARACIÓN: ANÁLISIS POR GRUPO DE PROVEEDORES RESTAURADO
         st.markdown("---")
         st.subheader("📌 Análisis por Grupo de Proveedores")
         proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
@@ -767,10 +784,13 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
 # =========================
 def app_endeudamiento_capex():
     st.title("🏦 Análisis de Endeudamiento y CAPEX")
-    ibr_ea = st.sidebar.number_input("IBR Efectiva Anual (%)", value=12.5) / 100
+    st.markdown("Simula el impacto de créditos de capital de trabajo y Leaseback de activos fijos.")
+    
+    st.markdown("### Tasa de Referencia Global")
+    ibr_ea = st.number_input("Tasa IBR Efectiva Anual (%)", value=12.5, step=0.1) / 100
+    st.markdown("---")
 
     t1, t2 = st.tabs(["💰 Crédito Capital de Trabajo", "🏗️ Leaseback de Maquinaria"])
-    
     with t1:
         colA, colB = st.columns(2)
         with colA:
@@ -778,18 +798,19 @@ def app_endeudamiento_capex():
             plazo = st.slider("Plazo (Meses)", 1, 6, 3)
         with colB:
             tipo_tasa = st.radio("Tipo de Tasa", ["Fija", "Variable (IBR + Spread)"])
-            if tipo_tasa == "Fija": tasa_final_ea = st.number_input("Tasa Fija E.A. (%)", value=18.0) / 100
-            else: tasa_final_ea = ibr_ea + (st.number_input("Spread E.A. (%)", value=5.0) / 100)
+            if tipo_tasa == "Fija": 
+                tasa_final_ea = st.number_input("Tasa Fija E.A. (%)", value=18.0) / 100
+            else: 
+                tasa_final_ea = ibr_ea + (st.number_input("Spread Crédito E.A. (%)", value=5.0) / 100)
 
         cuota = calcular_cuota_mensual(monto, tasa_final_ea, plazo)
         st.info(f"Desembolso: **${monto:,.0f}** | Cuota: **${cuota:,.0f}**")
         
-        # REPARACIÓN: BOTONES DE LIMPIAR RESTAURADOS
         c_btn1, c_btn2 = st.columns(2)
         with c_btn1:
             if st.button("🚀 Aplicar al Flujo de Caja", key="btn_cre"):
                 st.session_state.datos_credito = {"desembolso": monto, "cuota": cuota, "activo": True}
-                st.success("Cargado al Flujo de Caja.")
+                st.success("Cargado al Flujo de Caja (S1 y S4).")
         with c_btn2:
             if st.button("Limpiar Crédito", key="btn_cre_clear"):
                 st.session_state.datos_credito = {"desembolso": 0, "cuota": 0, "activo": False}
@@ -817,6 +838,7 @@ def app_endeudamiento_capex():
             if st.button("Limpiar Leaseback", key="btn_lea_clear"):
                 st.session_state.datos_leaseback = {"desembolso": 0, "cuota": 0, "activo": False}
                 st.success("Leaseback retirado.")
+
 
 # =========================
 # MÓDULO 5: SIMULADOR ESTRATÉGICO CCC
@@ -847,7 +869,6 @@ def app_simulador_ccc():
     r2.metric("Venta Promedio Diaria", f"${ventas_diarias:,.0f}")
     r3.metric("💰 Capital de Trabajo Liberado", f"${caja_liberada:,.0f}")
 
-    # REPARACIÓN: GRÁFICA DE SIMULADOR CCC RESTAURADA
     fig, ax = plt.subplots(figsize=(10, 4))
     categorias = ['Actual', 'Simulado']
     dso_vals = [dso_actual, dso_simulado]
@@ -866,6 +887,100 @@ def app_simulador_ccc():
 # =========================
 # MÓDULO 6: LECTOR DE ESTADOS FINANCIEROS Y KPIS
 # =========================
+def limpiar_y_extraer_ultimo_numero(val):
+    if pd.isna(val): return None
+    if isinstance(val, (int, float)): return float(val)
+    s = str(val).strip()
+    if not any(c.isdigit() for c in s): return None
+    
+    partes = s.replace("$", " ").replace("\n", " ").split()
+    for parte in reversed(partes):
+        if any(c.isdigit() for c in parte):
+            p = parte
+            is_negative = False
+            if "-" in p or ("(" in p and ")" in p):
+                is_negative = True
+                
+            if "." in p and "," in p:
+                if p.rfind(",") > p.rfind("."): p = p.replace(".", "").replace(",", ".")
+                else: p = p.replace(",", "")
+            elif "," in p:
+                if p.count(",") == 1 and len(p.split(",")[1]) <= 2: p = p.replace(",", ".") 
+                else: p = p.replace(",", "") 
+            elif "." in p:
+                if p.count(".") > 1 or len(p.split(".")[1]) == 3: p = p.replace(".", "") 
+            
+            p = ''.join(c for c in p if c.isdigit() or c == '.')
+            try: 
+                num = float(p)
+                return -num if is_negative else num
+            except ValueError: continue
+    return None
+
+def procesar_eeff(eeff_files):
+    keywords = {
+        "Efectivo": ["EFECTIVO Y EQUIVALENTES", "CAJA Y BANCOS"],
+        "Cuentas por Cobrar": ["CTAS POR COBRAR COMER", "CLIENTES", "DEUDORES COMERCIALES"],
+        "Inventarios": ["INVENTARIOS", "MERCANCIAS"],
+        "Activo Corriente": ["ACTIVO CORRIENTE", "ACTIVOS CORRIENTES"],
+        "Activo Total": ["TOTAL ACTIVO", "TOTAL ACTIVOS"],
+        "Pasivo Corriente": ["PASIVO CORRIENTE", "TOTAL PASIVO CORRIENTE"],
+        "Pasivo Total": ["TOTAL PASIVO", "TOTAL PASIVOS"],
+        "Patrimonio": ["TOTAL PATRIMONIO", "PATRIMONIO TOTAL"],
+        "Ingresos": ["INGRESOS DE ACTIVIDADES ORDINARIAS", "INGRESOS OPERACIONALES", "VENTAS"],
+        "Costo de Venta": ["COSTO DE VENTA", "COSTOS DE VENTAS"],
+        "Utilidad Bruta": ["GANANCIA BRUTA", "UTILIDAD BRUTA"],
+        "Gastos de Administración": ["GASTOS DE ADMINISTRACIÓN", "GASTOS ADMINISTRATIVOS", "GASTOS DE VENTAS Y DISTRIBUCION"],
+        "Utilidad Operativa": ["GANANCIA OPERATIVA", "UTILIDAD OPERATIVA"],
+        "Gastos Financieros": ["GASTOS FINANCIEROS"],
+        "Utilidad Neta": ["UTILIDAD DEL PERIODO", "GANANCIA NETA", "UTILIDAD NETA", "GANANCIA  (PÉRDIDA)"]
+    }
+    valores = {k: 0.0 for k in keywords}
+    if not eeff_files: return valores
+
+    for eeff_file in eeff_files:
+        if eeff_file.name.endswith('.csv'):
+            df = pd.read_csv(eeff_file, on_bad_lines='skip')
+            dfs = {"Hoja1": df}
+        else:
+            dfs = pd.read_excel(eeff_file, sheet_name=None)
+        
+        for sheet_name, df in dfs.items():
+            for idx, row in df.iterrows():
+                row_str = " ".join([str(x).upper() for x in row.values if pd.notnull(x)])
+                for key, kw_list in keywords.items():
+                    if valores[key] == 0.0:
+                        for kw in kw_list:
+                            if kw in row_str:
+                                for val in reversed(row.values):
+                                    numero = limpiar_y_extraer_ultimo_numero(val)
+                                    if numero is not None:
+                                        valores[key] = abs(numero)
+                                        break
+                                break
+    return valores
+
+def calcular_kpis_completos(valores):
+    pc = valores["Pasivo Corriente"] if valores["Pasivo Corriente"] > 0 else 1
+    pt = valores["Pasivo Total"] if valores["Pasivo Total"] > 0 else 1
+    at = valores["Activo Total"] if valores["Activo Total"] > 0 else 1
+    ing = valores["Ingresos"] if valores["Ingresos"] > 0 else 1
+    gf = valores["Gastos Financieros"] if valores["Gastos Financieros"] > 0 else 1
+    pat = valores["Patrimonio"] if valores["Patrimonio"] > 0 else 1
+
+    return {
+        "Razón Corriente": valores["Activo Corriente"] / pc,
+        "Prueba Ácida": (valores["Activo Corriente"] - valores["Inventarios"]) / pc,
+        "Capital de Trabajo": valores["Activo Corriente"] - valores["Pasivo Corriente"],
+        "Nivel Endeudamiento": valores["Pasivo Total"] / at,
+        "Cobertura Intereses": valores["Utilidad Operativa"] / gf,
+        "Margen Bruto": valores["Utilidad Bruta"] / ing,
+        "Margen Operativo": valores["Utilidad Operativa"] / ing,
+        "Margen Neto": valores["Utilidad Neta"] / ing,
+        "ROA": valores["Utilidad Neta"] / at,
+        "ROE": valores["Utilidad Neta"] / pat
+    }
+
 def app_analisis_financiero(eeff_files):
     st.title("📑 Lector de Estados Financieros (KPIs)")
     if not eeff_files:
@@ -874,7 +989,6 @@ def app_analisis_financiero(eeff_files):
         
     valores = procesar_eeff(eeff_files)
     kpis = calcular_kpis_completos(valores)
-    
     st.success("✅ Estados Financieros leídos exitosamente. Generando KPIs...")
     
     col1, col2, col3 = st.columns(3)
@@ -904,70 +1018,89 @@ def app_analisis_financiero(eeff_files):
 def generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp) -> bytes:
     if FPDF is None: return None
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(True, 15)
     
-    # PORTADA
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 20)
-    pdf.cell(200, 15, txt="REPORTE GERENCIAL CONSOLIDADO", ln=1, align='C')
+    pdf.set_font("Arial", 'B', 18)
+    pdf.cell(0, 15, "REPORTE GERENCIAL CONSOLIDADO", 0, 1, 'C')
     pdf.set_font("Arial", '', 12)
-    pdf.cell(200, 10, txt=f"Fecha de emision: {pd.Timestamp.today().strftime('%Y-%m-%d')}", ln=1, align='C')
+    pdf.cell(0, 10, f"Fecha de emision: {pd.Timestamp.today().strftime('%Y-%m-%d')}", 0, 1, 'C')
     pdf.ln(10)
     
-    # SECCIÓN 1: KPIS CONTABLES
     if kpis_eeff:
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, txt="1. PANORAMA FINANCIERO (KPIs)", ln=1)
+        pdf.cell(0, 10, "1. PANORAMA FINANCIERO (KPIs)", 0, 1)
         pdf.set_font("Arial", '', 11)
-        pdf.cell(200, 8, txt=f" - Capital de Trabajo: {formato_pesos(kpis_eeff.get('Capital de Trabajo', 0))}", ln=1)
-        pdf.cell(200, 8, txt=f" - Prueba Acida: {kpis_eeff.get('Prueba Ácida', 0):.2f}x", ln=1)
-        pdf.cell(200, 8, txt=f" - Nivel Endeudamiento: {kpis_eeff.get('Nivel Endeudamiento', 0)*100:.1f}%", ln=1)
-        pdf.cell(200, 8, txt=f" - ROE: {kpis_eeff.get('ROE', 0)*100:.1f}% | Margen Neto: {kpis_eeff.get('Margen Neto', 0)*100:.1f}%", ln=1)
+        pdf.cell(0, 8, f" - Capital de Trabajo: {formato_pesos(kpis_eeff.get('Capital de Trabajo', 0))}", 0, 1)
+        pdf.cell(0, 8, f" - Prueba Acida: {kpis_eeff.get('Prueba Ácida', 0):.2f}x", 0, 1)
+        pdf.cell(0, 8, f" - Nivel Endeudamiento: {kpis_eeff.get('Nivel Endeudamiento', 0)*100:.1f}%", 0, 1)
+        pdf.cell(0, 8, f" - ROE: {kpis_eeff.get('ROE', 0)*100:.1f}% | Margen Neto: {kpis_eeff.get('Margen Neto', 0)*100:.1f}%", 0, 1)
         pdf.ln(5)
 
-    # SECCIÓN 2: RIESGO CAMBIARIO Y OPERATIVO
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(200, 10, txt="2. EXPOSICION AL RIESGO Y OPERACION", ln=1)
+    pdf.cell(0, 10, "2. EXPOSICION AL RIESGO Y OPERACION", 0, 1)
     pdf.set_font("Arial", '', 11)
-    pdf.cell(200, 8, txt=f" - Saldo Vivo en USD (Facturado): {formato_pesos(data_fx['total_usd'])} USD", ln=1)
-    pdf.cell(200, 8, txt=f" - PnL Diferencia en Cambio no Realizada: {formato_pesos(data_fx['pnl_no_realizado'])} COP", ln=1)
-    pdf.cell(200, 8, txt=f" - Total Cuentas por Pagar (CxP): {formato_pesos(data_cxp['total_cxp'])} COP", ln=1)
-    pdf.cell(200, 8, txt=f" - Porcentaje de CxP Vencido: {data_cxp['porcentaje_vencido']:.1%}", ln=1)
+    pdf.cell(0, 8, f" - Saldo Vivo en USD (Facturado): {formato_pesos(data_fx['total_usd'])} USD", 0, 1)
+    pdf.cell(0, 8, f" - PnL Diferencia en Cambio no Realizada: {formato_pesos(data_fx['pnl_no_realizado'])} COP", 0, 1)
+    pdf.cell(0, 8, f" - Total Cuentas por Pagar (CxP): {formato_pesos(data_cxp['total_cxp'])} COP", 0, 1)
+    pdf.cell(0, 8, f" - Porcentaje de CxP Vencido: {data_cxp['porcentaje_vencido']:.1%}", 0, 1)
     pdf.ln(5)
 
-    # SECCIÓN 3: DEUDA Y ESTRATEGIA
     if not df_deuda.empty:
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(200, 10, txt="3. ESTRATEGIA DE FINANCIACION ACTIVA", ln=1)
+        pdf.cell(0, 10, "3. ESTRATEGIA DE FINANCIACION ACTIVA", 0, 1)
         pdf.set_font("Arial", '', 11)
         for _, row in df_deuda.iterrows():
-            pdf.cell(200, 8, txt=f" - {row['Tipo']}: Desembolso {formato_pesos(row['Desembolso'])} | Cuota: {formato_pesos(row['Cuota Mensual'])}", ln=1)
+            pdf.cell(0, 8, f" - {row['Tipo']}: Desembolso {formato_pesos(row['Desembolso'])} | Cuota: {formato_pesos(row['Cuota Mensual'])}", 0, 1)
     
-    # PÁGINA DE GRÁFICOS
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(200, 10, txt="ANEXOS GRAFICOS", ln=1, align='C')
+    pdf.cell(0, 10, "ANEXOS GRAFICOS", 0, 1, 'C')
     pdf.ln(5)
-    
     y_start = pdf.get_y()
     
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t1:
-        fig_liq.savefig(t1.name, format="png", bbox_inches="tight")
-        pdf.image(t1.name, x=10, y=y_start, w=90)
+    # Archivos temporales seguros (compatibilidad FPDF + Windows)
+    t1 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    fig_liq.savefig(t1.name, format="png", bbox_inches="tight")
+    t1.close()
+    pdf.image(t1.name, x=10, y=y_start, w=90)
         
+    t2_name = None
     if fig_margenes:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t2:
-            fig_margenes.savefig(t2.name, format="png", bbox_inches="tight")
-            pdf.image(t2.name, x=110, y=y_start, w=90)
+        t2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        fig_margenes.savefig(t2.name, format="png", bbox_inches="tight")
+        t2.close()
+        t2_name = t2.name
+        pdf.image(t2_name, x=110, y=y_start, w=90)
             
+    t3_name = None
     if fig_cxp:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t3:
-            fig_cxp.savefig(t3.name, format="png", bbox_inches="tight")
-            pdf.image(t3.name, x=60, y=y_start + 80, w=90)
+        t3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        fig_cxp.savefig(t3.name, format="png", bbox_inches="tight")
+        t3.close()
+        t3_name = t3.name
+        pdf.image(t3_name, x=60, y=y_start + 80, w=90)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
-        pdf.output(pdf_file.name)
-        with open(pdf_file.name, "rb") as f: pdf_bytes = f.read()
+    pdf_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf_name = pdf_file.name
+    pdf_file.close()
+    
+    pdf.output(pdf_name)
+    with open(pdf_name, "rb") as f: 
+        pdf_bytes = f.read()
+        
+    # Limpieza de temporales
+    try: os.remove(t1.name)
+    except: pass
+    if t2_name:
+        try: os.remove(t2_name)
+        except: pass
+    if t3_name:
+        try: os.remove(t3_name)
+        except: pass
+    try: os.remove(pdf_name)
+    except: pass
+    
     return pdf_bytes
 
 def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
@@ -976,7 +1109,6 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
         st.warning("⚠️ Para el súper reporte, sube en la barra lateral: 1. CxC, 3. CxP y 5. Estados Financieros.")
         return
 
-    # 1. Datos FX
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
     df_trm = descargar_trm_historica(df_usd["fecha_factura"].dropna().min() if not df_usd["fecha_factura"].dropna().empty else pd.Timestamp.today(), pd.Timestamp.today())
@@ -989,7 +1121,6 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
         "pnl_no_realizado": df_facturadas_usd['dif_no_realizada'].sum()
     }
 
-    # 2. Datos Compras
     df_compras = procesar_compras_dataframe(f_compras)
     pasivo_corriente_cxp = df_compras['VALOR'].sum() if not df_compras.empty else 0.0
     pasivo_vencido = df_compras[df_compras['VENCIMIENTO'] < pd.Timestamp.today()]['VALOR'].sum() if not df_compras.empty else 0.0
@@ -998,11 +1129,9 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
         "porcentaje_vencido": (pasivo_vencido / pasivo_corriente_cxp) if pasivo_corriente_cxp > 0 else 0
     }
 
-    # 3. Datos EEFF
     valores_eeff = procesar_eeff(eeff_files)
     kpis_eeff = calcular_kpis_completos(valores_eeff)
 
-    # 4. Deuda Activa
     deuda_activa = []
     if st.session_state.datos_credito["activo"]:
         deuda_activa.append({"Tipo": "Crédito Cap. Trabajo", "Desembolso": st.session_state.datos_credito["desembolso"], "Cuota Mensual": st.session_state.datos_credito["cuota"]})
@@ -1012,7 +1141,6 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
 
     st.success("✅ Todos los módulos integrados. Generando previsualización...")
 
-    # Generación de Gráficos para el PDF
     fig_liq, ax1 = plt.subplots(figsize=(6, 4))
     ax1.bar(["Activo Corriente", "Pasivo Corriente"], [valores_eeff.get("Activo Corriente",0), valores_eeff.get("Pasivo Corriente",0)], color=["#50E3C2", "#E15554"])
     ax1.set_title("Estructura de Liquidez")
@@ -1023,8 +1151,13 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     ax2.set_title("Márgenes de Rentabilidad")
     ax2.yaxis.set_major_formatter(FuncFormatter(formato_porcentaje))
 
+    # REPARACIÓN: RED DE SEGURIDAD EN GRÁFICA DE PASTEL
     fig_cxp, ax3 = plt.subplots(figsize=(6, 4))
-    ax3.pie([pasivo_vencido, pasivo_corriente_cxp - pasivo_vencido], labels=["Vencido", "Al Día"], colors=["#E15554", "#50E3C2"], autopct='%1.1f%%', startangle=90)
+    if pasivo_corriente_cxp > 0:
+        val_al_dia = max(pasivo_corriente_cxp - pasivo_vencido, 0)
+        ax3.pie([pasivo_vencido, val_al_dia], labels=["Vencido", "Al Día"], colors=["#E15554", "#50E3C2"], autopct='%1.1f%%', startangle=90)
+    else:
+        ax3.pie([1], labels=["Sin Deuda"], colors=["#50E3C2"])
     ax3.set_title("Estado de Proveedores (CxP)")
 
     c1, c2, c3 = st.columns(3)
@@ -1034,10 +1167,11 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
 
     st.markdown("---")
     if FPDF is None:
-        st.error("⚠️ Instala la librería ejecutando: `pip install fpdf` en tu terminal, y reinicia streamlit.")
+        st.error("⚠️ Instala la librería ejecutando: `pip install fpdf` en tu terminal, y reinicia streamlit (`Ctrl+C` y luego `streamlit run app.py`).")
     else:
         pdf_bytes = generar_pdf_integral(kpis_eeff, data_fx, data_cxp, df_deuda, fig_liq, fig_margenes, fig_cxp)
-        st.download_button("📄 Descargar Súper Reporte Gerencial (PDF)", data=pdf_bytes, file_name="Super_Reporte_Gerencial.pdf", mime="application/pdf")
+        if pdf_bytes:
+            st.download_button("📄 Descargar Súper Reporte Gerencial (PDF)", data=pdf_bytes, file_name="Super_Reporte_Gerencial.pdf", mime="application/pdf")
 
 
 # =========================
