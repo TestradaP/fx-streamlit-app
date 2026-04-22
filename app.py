@@ -14,7 +14,15 @@ from matplotlib.ticker import FuncFormatter
 # =========================
 # CONFIGURACIÓN DE PÁGINA (Debe ser el primer comando)
 # =========================
-st.set_page_config(page_title="Dashboard Financiero", layout="wide")
+st.set_page_config(page_title="Dashboard Financiero Pro", layout="wide")
+
+# =========================
+# ESTADO DE SESIÓN (Para conectar Módulos)
+# =========================
+if "datos_credito" not in st.session_state:
+    st.session_state.datos_credito = {"desembolso": 0, "cuota": 0, "activo": False}
+if "datos_leaseback" not in st.session_state:
+    st.session_state.datos_leaseback = {"desembolso": 0, "cuota": 0, "activo": False}
 
 # =========================
 # CONFIGURACIÓN GENERAL
@@ -28,7 +36,7 @@ SPREAD_POR_DEFECTO = 0.02
 
 
 # =========================
-# FORMATO
+# FORMATOS Y MATEMÁTICA
 # =========================
 def formato_pesos(x, pos=None):
     return f"${x:,.0f}"
@@ -36,31 +44,30 @@ def formato_pesos(x, pos=None):
 def formato_pesos_decimales(x, pos=None):
     return f"${x:,.2f}"
 
+def calcular_cuota_mensual(valor_credito, tasa_ea, meses):
+    if valor_credito <= 0 or meses <= 0:
+        return 0
+    tasa_mensual = (1 + tasa_ea)**(1/12) - 1
+    if tasa_mensual == 0:
+        return valor_credito / meses
+    cuota = valor_credito * (tasa_mensual * (1 + tasa_mensual)**meses) / ((1 + tasa_mensual)**meses - 1)
+    return cuota
+
 
 # =========================
 # VALIDACIONES Y CARGA (Para Diferencia en Cambio)
 # =========================
 def validar_columnas_facturas(df: pd.DataFrame) -> None:
-    columnas_requeridas = {
-        "factura",
-        "cliente",
-        "fecha_factura",
-        "moneda",
-        "valor_usd",
-    }
+    columnas_requeridas = {"factura", "cliente", "fecha_factura", "moneda", "valor_usd"}
     faltantes = columnas_requeridas - set(df.columns)
     if faltantes:
-        raise ValueError(
-            f"Faltan columnas obligatorias en facturas_abiertas.xlsx: {sorted(faltantes)}"
-        )
+        raise ValueError(f"Faltan columnas obligatorias en facturas_abiertas.xlsx: {sorted(faltantes)}")
 
 def validar_columnas_monetizaciones(df: pd.DataFrame) -> None:
     columnas_requeridas = {"fecha", "factura", "monto_usd", "tasa_monetizacion"}
     faltantes = columnas_requeridas - set(df.columns)
     if faltantes:
-        raise ValueError(
-            f"Faltan columnas obligatorias en monetizaciones.xlsx: {sorted(faltantes)}"
-        )
+        raise ValueError(f"Faltan columnas obligatorias en monetizaciones.xlsx: {sorted(faltantes)}")
 
 def cargar_facturas(archivo) -> pd.DataFrame:
     df = pd.read_excel(archivo)
@@ -144,9 +151,7 @@ def descargar_trm_historica(start_date: pd.Timestamp, end_date: pd.Timestamp) ->
             fecha_max = df_trm["fecha"].max().normalize()
             if fecha_max >= end_date.normalize() - pd.Timedelta(days=3):
                 return df_trm
-            errores.append(
-                f"{dataset_id}: llegó hasta {fecha_max.date()}, no hasta {end_date.date()}"
-            )
+            errores.append(f"{dataset_id}: llegó hasta {fecha_max.date()}")
         except Exception as e:
             errores.append(f"{dataset_id}: {e}")
 
@@ -165,10 +170,7 @@ def descargar_trm_desde_datos_abiertos(
     url = f"{DATOS_GOV_BASE}/{dataset_id}.json"
     params = {
         "$select": "valor,vigenciadesde,vigenciahasta",
-        "$where": (
-            f"vigenciadesde <= '{end_iso}' "
-            f"AND vigenciahasta >= '{start_iso}'"
-        ),
+        "$where": f"vigenciadesde <= '{end_iso}' AND vigenciahasta >= '{start_iso}'",
         "$order": "vigenciadesde ASC",
         "$limit": 50000,
     }
@@ -233,7 +235,7 @@ def asignar_trm_factura(df_facturas: pd.DataFrame, df_trm: pd.DataFrame) -> pd.D
 
 
 # =========================
-# CÁLCULOS
+# CÁLCULOS (Diferencia Cambio)
 # =========================
 def validar_monetizaciones_vs_facturas(df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame) -> pd.DataFrame:
     if df_monetizaciones.empty:
@@ -250,6 +252,17 @@ def validar_monetizaciones_vs_facturas(df_facturas: pd.DataFrame, df_monetizacio
     control["saldo_vivo_calculado"] = control["valor_usd"] - control["monto_usd"]
     control["saldo_vivo_calculado"] = control["saldo_vivo_calculado"].clip(lower=0)
     return control
+
+def separar_monetizaciones_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataFrame):
+    factura = str(fila_factura["factura"]).strip()
+    fecha_factura = pd.to_datetime(fila_factura["fecha_factura"]).normalize()
+    monet = df_monetizaciones[df_monetizaciones["factura"] == factura].copy()
+    if monet.empty:
+        return monet.copy(), monet.copy()
+    monet["fecha"] = pd.to_datetime(monet["fecha"]).dt.normalize()
+    anticipos = monet[monet["fecha"] < fecha_factura].copy()
+    post = monet[monet["fecha"] >= fecha_factura].copy()
+    return anticipos, post
 
 def calcular_resumen_actual(
     df_facturas: pd.DataFrame, df_monetizaciones: pd.DataFrame,
@@ -324,7 +337,6 @@ def construir_saldos_diarios(
     monetizaciones_por_factura = {f: g.sort_values("fecha") for f, g in df_monetizaciones.groupby("factura")} if not df_monetizaciones.empty else {}
 
     for _, fila in df_facturas.iterrows():
-        # Ignorar facturas sin fecha en la serie de tiempo
         if pd.isna(fila["fecha_factura"]):
             continue
 
@@ -401,8 +413,9 @@ def construir_serie_factura(fila_factura: pd.Series, df_monetizaciones: pd.DataF
     detalle_diario["dif_dia_base"] = detalle_diario["dif_no_realizada"].diff().fillna(0)
     return detalle_diario
 
+
 # =========================
-# EXPORTACIÓN Y GRÁFICOS
+# EXPORTACIÓN Y GRÁFICOS (DIFERENCIA CAMBIO)
 # =========================
 def exportar_resultados_excel(detalle_actual, serie_total, detalle_diario) -> bytes:
     output = BytesIO()
@@ -542,7 +555,7 @@ def fig_factura_individual(serie_factura, factura, dif_total_actual, dif_dia_bas
 
 
 # =========================
-# APP 1: DIFERENCIA EN CAMBIO (MAIN)
+# APP 1: DIFERENCIA EN CAMBIO (Pestaña)
 # =========================
 def app_diferencia_cambio():
     st.title("Diferencia en cambio - cartera en USD")
@@ -673,6 +686,7 @@ def procesar_compras_dataframe(compras_files):
     dfs = []
     for file in compras_files:
         df_temp = pd.read_excel(file, header=0, engine="openpyxl")
+        
         if isinstance(df_temp.columns, pd.MultiIndex):
             df_temp.columns = ["_".join([str(i) for i in col if str(i) != "nan"]) for col in df_temp.columns]
             
@@ -684,12 +698,16 @@ def procesar_compras_dataframe(compras_files):
         df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
 
         columnas_requeridas = {"PROVEEDOR", "VALOR", "FACTURA", "GENERACIO", "VENCIMIENTO"}
-        if not columnas_requeridas.issubset(df_temp.columns): continue
+        if not columnas_requeridas.issubset(df_temp.columns):
+            st.warning(f"⚠️ El archivo '{file.name}' no tiene las columnas necesarias y será omitido.")
+            continue
 
         df_temp = df_temp.dropna(subset=["GENERACIO"])
         df_temp = df_temp[df_temp["GENERACIO"].astype(str).str.strip() != ""]
         df_temp = df_temp.dropna(subset=["PROVEEDOR"])
         df_temp["PROVEEDOR"] = df_temp["PROVEEDOR"].astype(str).str.strip()
+        
+        # Formato Latino (dayfirst=True)
         df_temp["GENERACIO"] = pd.to_datetime(df_temp["GENERACIO"], errors="coerce", dayfirst=True)
         df_temp["VENCIMIENTO"] = pd.to_datetime(df_temp["VENCIMIENTO"], errors="coerce", dayfirst=True)
         df_temp["VALOR"] = pd.to_numeric(df_temp["VALOR"], errors="coerce")
@@ -703,86 +721,192 @@ def app_facturas_compras():
     st.title("📊 Dashboard de Facturas de Compras")
     st.markdown("Analiza tus proveedores y genera tu archivo de pagos a realizar.")
 
-    compras_files = st.file_uploader("Archivo(s) de Facturas de Compras", type=["xlsx", "xlsm", "xls"], accept_multiple_files=True, key="compras_app_files")
+    compras_files = st.file_uploader(
+        "Archivo(s) de Facturas de Compras",
+        type=["xlsx", "xlsm", "xls"],
+        key="compras_app_files",
+        accept_multiple_files=True
+    )
 
     if not compras_files:
-        st.info("👆 Sube tus archivos Excel para comenzar.")
+        st.info("👆 Sube tus archivos Excel para comenzar el análisis.")
         return
 
-    df_all = procesar_compras_dataframe(compras_files)
+    try:
+        df_all = procesar_compras_dataframe(compras_files)
 
-    if df_all.empty:
-        st.error("❌ Ninguno de los archivos subidos contenía datos válidos.")
-        return
+        if df_all.empty:
+            st.error("❌ Ninguno de los archivos subidos contenía datos válidos tras limpiar los registros sin fecha.")
+            return
 
-    hoy = pd.Timestamp.today().normalize()
-    df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
-    df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
-    df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
-    df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
-    df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
-    df_all["PROXIMO_A_VENCER"] = (df_all["DIAS_PARA_VENCER"] >= 1) & (df_all["DIAS_PARA_VENCER"] <= 7)
+        hoy = pd.Timestamp.today().normalize()
+        df_all["MES_GENERACION"] = df_all["GENERACIO"].dt.strftime('%Y-%m')
+        df_all["DIAS_CREDITO"] = (df_all["VENCIMIENTO"] - df_all["GENERACIO"]).dt.days
+        df_all["VENCIDA"] = df_all["VENCIMIENTO"] < hoy
+        df_all["DIAS_VENCIDA"] = (hoy - df_all["VENCIMIENTO"]).dt.days.clip(lower=0)
+        df_all["DIAS_PARA_VENCER"] = (df_all["VENCIMIENTO"] - hoy).dt.days
+        df_all["PROXIMO_A_VENCER"] = (df_all["DIAS_PARA_VENCER"] >= 1) & (df_all["DIAS_PARA_VENCER"] <= 7)
 
-    def clasificar_riesgo(row):
-        if row["VENCIDA"]: return "🔴 Vencida Crítica (>30d)" if row["DIAS_VENCIDA"] > 30 else "🟠 Vencida Reciente (1-30d)"
-        else: return "🟡 Próximo a Vencer (1-7d)" if row["PROXIMO_A_VENCER"] else "🟢 Al día (>7d)"
-    df_all["RIESGO"] = df_all.apply(clasificar_riesgo, axis=1)
+        def clasificar_riesgo(row):
+            if row["VENCIDA"]:
+                if row["DIAS_VENCIDA"] > 30: return "🔴 Vencida Crítica (>30d)"
+                else: return "🟠 Vencida Reciente (1-30d)"
+            else:
+                if row["PROXIMO_A_VENCER"]: return "🟡 Próximo a Vencer (1-7d)"
+                else: return "🟢 Al día (>7d)"
 
-    tab1, tab2 = st.tabs(["📊 Análisis y Dashboard", "💸 Planeador de Pagos"])
+        df_all["RIESGO"] = df_all.apply(clasificar_riesgo, axis=1)
 
-    with tab1:
-        st.subheader("Rango de Análisis")
-        meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
-        meses_sel = st.multiselect("Selecciona meses a analizar:", options=meses_disponibles, default=meses_disponibles)
-        df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
+        tab1, tab2 = st.tabs(["📊 Análisis y Dashboard", "💸 Planeador de Pagos"])
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("💰 Saldo Total", f"${df_filtrado['VALOR'].sum():,.0f}")
-        c2.metric("🟢 Al Día", f"${df_filtrado[df_filtrado['RIESGO'] == '🟢 Al día (>7d)']['VALOR'].sum():,.0f}")
-        c3.metric("🟡 Próx. Vencer", f"${df_filtrado[df_filtrado['RIESGO'] == '🟡 Próximo a Vencer (1-7d)']['VALOR'].sum():,.0f}")
-        c4.metric("🟠 Venc. Reciente", f"${df_filtrado[df_filtrado['RIESGO'] == '🟠 Vencida Reciente (1-30d)']['VALOR'].sum():,.0f}")
-        c5.metric("🔴 Venc. Crítica", f"${df_filtrado[df_filtrado['RIESGO'] == '🔴 Vencida Crítica (>30d)']['VALOR'].sum():,.0f}")
-
-        st.dataframe(df_filtrado[["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO"]], use_container_width=True)
-
-    with tab2:
-        st.subheader("Generador de Archivo de Pagos")
-        st.write("Selecciona en la columna izquierda las facturas que vas a cancelar. Luego descarga el archivo para usarlo en el Flujo de Caja.")
-        
-        df_pagos = df_all.copy()
-        df_pagos.insert(0, "PAGAR", False)
-        
-        edited_df = st.data_editor(
-            df_pagos[["PAGAR", "PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO", "GENERACIO"]],
-            column_config={
-                "PAGAR": st.column_config.CheckboxColumn("Seleccionar", default=False),
-                "VALOR": st.column_config.NumberColumn(format="$%d")
-            },
-            disabled=["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO", "GENERACIO"],
-            hide_index=True,
-            use_container_width=True
-        )
-
-        facturas_seleccionadas = edited_df[edited_df["PAGAR"]]
-
-        if not facturas_seleccionadas.empty:
-            st.success(f"Has seleccionado {len(facturas_seleccionadas)} facturas por un total de **${facturas_seleccionadas['VALOR'].sum():,.0f}**")
+        with tab1:
+            st.subheader("📅 Rango de Análisis")
+            meses_disponibles = sorted(df_all["MES_GENERACION"].unique())
+            meses_sel = st.multiselect("Selecciona los meses a analizar:", options=meses_disponibles, default=meses_disponibles)
             
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_export = df_all[df_all["FACTURA"].isin(facturas_seleccionadas["FACTURA"])].drop(columns=['MES_GENERACION', 'DIAS_CREDITO', 'VENCIDA', 'DIAS_VENCIDA', 'DIAS_PARA_VENCER', 'PROXIMO_A_VENCER', 'RIESGO'], errors='ignore')
-                df_export.to_excel(writer, index=False)
-            
-            st.download_button(
-                label="⬇️ Descargar Archivo de Pagos (Excel)",
-                data=output.getvalue(),
-                file_name="pagos_realizados.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if not meses_sel:
+                st.warning("Selecciona al menos un mes para ver datos.")
+                return
+
+            df_filtrado = df_all[df_all["MES_GENERACION"].isin(meses_sel)].copy()
+
+            st.subheader("🌐 Resumen de Cartera (Meses seleccionados)")
+
+            saldo_total = df_filtrado["VALOR"].sum()
+            saldo_al_dia = df_filtrado[df_filtrado["RIESGO"] == "🟢 Al día (>7d)"]["VALOR"].sum()
+            saldo_proximo = df_filtrado[df_filtrado["RIESGO"] == "🟡 Próximo a Vencer (1-7d)"]["VALOR"].sum()
+            saldo_venc_reciente = df_filtrado[df_filtrado["RIESGO"] == "🟠 Vencida Reciente (1-30d)"]["VALOR"].sum()
+            saldo_venc_critico = df_filtrado[df_filtrado["RIESGO"] == "🔴 Vencida Crítica (>30d)"]["VALOR"].sum()
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("💰 Saldo Total", f"${saldo_total:,.0f}")
+            c2.metric("🟢 Al Día", f"${saldo_al_dia:,.0f}")
+            c3.metric("🟡 Próx. Vencer", f"${saldo_proximo:,.0f}")
+            c4.metric("🟠 Venc. Reciente", f"${saldo_venc_reciente:,.0f}")
+            c5.metric("🔴 Venc. Crítica", f"${saldo_venc_critico:,.0f}")
+
+            fig, ax = plt.subplots(figsize=(12, 4))
+            categorias = ["Total", "Al día", "Próx. a Vencer", "Venc. Reciente", "Venc. Crítica"]
+            valores = [saldo_total, saldo_al_dia, saldo_proximo, saldo_venc_reciente, saldo_venc_critico]
+            colores = ["#4A90E2", "#50E3C2", "#F5A623", "#F57C00", "#E15554"]
+
+            bars = ax.bar(categorias, valores, color=colores, alpha=0.85)
+            ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+            ax.set_title("Distribución de Saldos por Edades (General)", fontsize=14)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            for bar in bars:
+                yval = bar.get_height()
+                if yval > 0:
+                    ax.text(bar.get_x() + bar.get_width()/2, yval, f'${yval:,.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+            st.pyplot(fig, clear_figure=True)
+
+            st.markdown("---")
+
+            st.subheader("📌 Análisis por Grupo de Proveedores")
+            proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
+
+            proveedores_sel = st.multiselect(
+                "Selecciona uno o varios proveedores para agrupar (Ej. Proveedores de chatarra):",
+                options=proveedores_disponibles
             )
+
+            if proveedores_sel:
+                df_prov = df_filtrado[df_filtrado["PROVEEDOR"].isin(proveedores_sel)].copy()
+
+                p_total = df_prov["VALOR"].sum()
+                p_al_dia = df_prov[df_prov["RIESGO"] == "🟢 Al día (>7d)"]["VALOR"].sum()
+                p_proximo = df_prov[df_prov["RIESGO"] == "🟡 Próximo a Vencer (1-7d)"]["VALOR"].sum()
+                p_venc_reciente = df_prov[df_prov["RIESGO"] == "🟠 Vencida Reciente (1-30d)"]["VALOR"].sum()
+                p_venc_critico = df_prov[df_prov["RIESGO"] == "🔴 Vencida Crítica (>30d)"]["VALOR"].sum()
+
+                st.write(f"**Resumen del grupo seleccionado ({len(proveedores_sel)} proveedores):**")
+                p1, p2, p3, p4, p5 = st.columns(5)
+                p1.metric("Total Grupo", f"${p_total:,.0f}")
+                p2.metric("Al día", f"${p_al_dia:,.0f}")
+                p3.metric("Próx. Vencer", f"${p_proximo:,.0f}")
+                p4.metric("Venc. Reciente", f"${p_venc_reciente:,.0f}")
+                p5.metric("Venc. Crítica", f"${p_venc_critico:,.0f}")
+
+                alerta_60_vencidas = df_prov[(df_prov["DIAS_CREDITO"] < 60) & df_prov["VENCIDA"]]
+                if not alerta_60_vencidas.empty:
+                    st.error("⚠️ **Atención: Hay facturas vencidas con crédito menor a 60 días en este grupo.** \n\n *(Revisar negociación con los proveedores correspondientes).*")
+
+                st.write("**Detalle de facturas activas del grupo:**")
+                
+                riesgos_grupo = sorted(df_prov["RIESGO"].unique())
+                riesgos_sel = st.multiselect(
+                    "🔍 Filtrar tabla por Estado de Riesgo:",
+                    options=riesgos_grupo,
+                    default=riesgos_grupo
+                )
+                
+                df_mostrar = df_prov[df_prov["RIESGO"].isin(riesgos_sel)]
+
+                columnas_mostrar = [
+                    "PROVEEDOR", "FACTURA", "VALOR", "GENERACIO", "VENCIMIENTO",
+                    "DIAS_CREDITO", "DIAS_VENCIDA", "RIESGO"
+                ]
+
+                st.dataframe(
+                    df_mostrar[columnas_mostrar]
+                    .sort_values(["RIESGO", "VENCIMIENTO"])
+                    .style.format({
+                        "VALOR": "${:,.2f}",
+                        "GENERACIO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else "",
+                        "VENCIMIENTO": lambda t: t.strftime("%Y-%m-%d") if pd.notnull(t) else ""
+                    }),
+                    use_container_width=True
+                )
+            else:
+                st.info("💡 Selecciona proveedores en la casilla de arriba para ver su detalle agrupado.")
+
+        # =========================
+        # PLANEADOR DE PAGOS
+        # =========================
+        with tab2:
+            st.subheader("Generador de Archivo de Pagos")
+            st.write("Selecciona en la columna izquierda las facturas que vas a cancelar. Luego descarga el archivo para usarlo en el Flujo de Caja.")
+            
+            df_pagos = df_all.copy()
+            df_pagos.insert(0, "PAGAR", False)
+            
+            edited_df = st.data_editor(
+                df_pagos[["PAGAR", "PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO", "GENERACIO"]],
+                column_config={
+                    "PAGAR": st.column_config.CheckboxColumn("Seleccionar", default=False),
+                    "VALOR": st.column_config.NumberColumn(format="$%d")
+                },
+                disabled=["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO", "GENERACIO"],
+                hide_index=True,
+                use_container_width=True
+            )
+
+            facturas_seleccionadas = edited_df[edited_df["PAGAR"]]
+
+            if not facturas_seleccionadas.empty:
+                st.success(f"Has seleccionado {len(facturas_seleccionadas)} facturas por un total de **${facturas_seleccionadas['VALOR'].sum():,.0f}**")
+                
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    df_export = df_all[df_all["FACTURA"].isin(facturas_seleccionadas["FACTURA"])].drop(columns=['MES_GENERACION', 'DIAS_CREDITO', 'VENCIDA', 'DIAS_VENCIDA', 'DIAS_PARA_VENCER', 'PROXIMO_A_VENCER', 'RIESGO'], errors='ignore')
+                    df_export.to_excel(writer, index=False)
+                
+                st.download_button(
+                    label="⬇️ Descargar Archivo de Pagos (Excel)",
+                    data=output.getvalue(),
+                    file_name="pagos_realizados.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+    except Exception as e:
+        st.error(f"❌ Error procesando los archivos: {e}")
 
 
 # =========================
-# APP 3: FLUJO DE CAJA 
+# APP 3: FLUJO DE CAJA (FINAL)
 # =========================
 def obtener_semanas_fc():
     hoy = pd.Timestamp.today().normalize()
@@ -797,54 +921,67 @@ def obtener_semanas_fc():
 
 def cargar_datos_manuales():
     if os.path.exists("flujo_caja_manual.json"):
-        with open("flujo_caja_manual.json", "r") as f: 
+        with open("flujo_caja_manual.json", "r") as f:
             return json.load(f)
     return {
         "saldo_inicial": 0, 
-        "S1": {}, "S2": {}, "S3": {}, "S4": {}
+        "S1": {"ordinarios": 0, "extra": 0, "f_serv": 0, "f_arr": 0, "f_otr": 0, "n_sue": 0, "n_ss": 0, "n_otr": 0}, 
+        "S2": {"ordinarios": 0, "extra": 0, "f_serv": 0, "f_arr": 0, "f_otr": 0, "n_sue": 0, "n_ss": 0, "n_otr": 0}, 
+        "S3": {"ordinarios": 0, "extra": 0, "f_serv": 0, "f_arr": 0, "f_otr": 0, "n_sue": 0, "n_ss": 0, "n_otr": 0}, 
+        "S4": {"ordinarios": 0, "extra": 0, "f_serv": 0, "f_arr": 0, "f_otr": 0, "n_sue": 0, "n_ss": 0, "n_otr": 0}
     }
 
 def guardar_datos_manuales(data):
-    with open("flujo_caja_manual.json", "w") as f: 
+    with open("flujo_caja_manual.json", "w") as f:
         json.dump(data, f)
 
 def app_flujo_caja():
     st.title("💸 Flujo de Caja a 4 Semanas")
+    st.markdown("Proyección de ingresos en USD (convertidos a COP) y egresos por pagos a proveedores.")
+
     hoy_dt = pd.Timestamp.today()
     es_dia_edicion = hoy_dt.weekday() in [0, 1]
 
     col1, col2 = st.columns(2)
     with col1: st.info(f"📅 Hoy es: **{hoy_dt.strftime('%A, %d de %B')}**")
-    with col2: forzar_edicion = st.checkbox("⚙️ Forzar Edición (Modo Admin)")
+    with col2: 
+        forzar_edicion = st.checkbox("⚙️ Forzar Edición (Modo Admin)")
 
     puede_editar = es_dia_edicion or forzar_edicion
-    if not puede_editar: st.warning("🔒 **Modo Lectura Activo:** El Flujo de Caja solo se puede actualizar los días Lunes y Martes.")
+
+    if not puede_editar:
+        st.warning("🔒 **Modo Lectura Activo:** El Flujo de Caja solo se puede actualizar los días Lunes y Martes.")
 
     st.markdown("### 1. Carga de Archivos Base")
     colA, colB, colC, colD = st.columns(4)
     with colA: f_usd = st.file_uploader("CxC (USD)", type=["xlsx"])
     with colB: m_usd = st.file_uploader("Monetizaciones", type=["xlsx"])
     with colC: f_compras = st.file_uploader("CxP (COP) [Múltiples]", type=["xlsx", "xlsm"], accept_multiple_files=True)
-    with colD: f_pagos = st.file_uploader("Pagos Realizados", type=["xlsx", "xlsm"], accept_multiple_files=True)
+    with colD: f_pagos = st.file_uploader("Pagos Realizados (Conciliación)", type=["xlsx", "xlsm"], accept_multiple_files=True)
 
     if not (f_usd and f_compras):
-        st.info("Sube al menos Cuentas por Cobrar en USD y un archivo de Compras en COP.")
+        st.info("Sube al menos Cuentas por Cobrar en USD y un archivo de Compras en COP para ver la proyección.")
         return
 
-    # Procesar Ingresos USD 
+    # Procesar Ingresos USD
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
-    df_trm = descargar_trm_historica(df_usd["fecha_factura"].dropna().min().normalize() if not df_usd["fecha_factura"].dropna().empty else hoy_dt.normalize(), hoy_dt.normalize())
+    
+    fechas_validas = df_usd["fecha_factura"].dropna()
+    fecha_inicial = fechas_validas.min().normalize() if not fechas_validas.empty else hoy_dt.normalize()
+    df_trm = descargar_trm_historica(fecha_inicial, hoy_dt.normalize())
     
     df_usd = asignar_trm_factura(df_usd, df_trm)
     trm_hoy = float(df_trm["trm"].iloc[-1])
     resumen_usd = calcular_resumen_actual(df_usd, df_mon, trm_hoy, trm_hoy, 0.0)
     
+    # Solo toma el saldo vivo de las facturadas (con fecha) para el 20%
     df_facturadas_usd = resumen_usd[resumen_usd["fecha_factura"].notna()]
     saldo_vivo_usd_total = df_facturadas_usd['saldo_vivo_actual_usd'].sum()
     saldo_vivo_cop_total = saldo_vivo_usd_total * trm_hoy
     ingreso_semanal_usd_cop = saldo_vivo_cop_total * 0.20 
 
+    # Procesar Compras (COP) y descontar pagos
     df_compras = procesar_compras_dataframe(f_compras)
     
     if f_pagos and not df_compras.empty:
@@ -858,6 +995,7 @@ def app_flujo_caja():
     
     ap_semanas = [0, 0, 0, 0]
     if not df_compras.empty:
+        # Semana 1 incluye todo lo vencido previo
         ap_semanas[0] = df_compras[df_compras['VENCIMIENTO'] <= semanas[0]['end']]['VALOR'].sum()
         ap_semanas[1] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[1]['start']) & (df_compras['VENCIMIENTO'] <= semanas[1]['end'])]['VALOR'].sum()
         ap_semanas[2] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[2]['start']) & (df_compras['VENCIMIENTO'] <= semanas[2]['end'])]['VALOR'].sum()
@@ -866,8 +1004,11 @@ def app_flujo_caja():
     data_manual = cargar_datos_manuales()
 
     st.markdown("### 2. Variables del Flujo (COP)")
+    
     with st.form("form_flujo"):
         saldo_bancos = st.number_input("Saldo Inicial en Bancos (Ahorro COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
+        
+        st.markdown("**Proyección Manual a 4 Semanas**")
         cols = st.columns(4)
         nuevos_datos = {}
         
@@ -899,22 +1040,39 @@ def app_flujo_caja():
                     "n_sue": n_sue, "n_ss": n_ss, "n_otr": n_otr
                 }
 
-        if st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar):
+        submit = st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar)
+        if submit:
             data_manual["saldo_inicial"] = saldo_bancos
             data_manual.update(nuevos_datos)
             guardar_datos_manuales(data_manual)
             st.success("¡Datos guardados correctamente!")
 
+    # =========================
+    # TABLA FINAL DE FLUJO DE CAJA
+    # =========================
     st.markdown("### 3. Resultado Flujo de Caja")
+    
     tabla_fc = []
     saldo_actual = data_manual.get("saldo_inicial", 0)
 
+    # Variables de Endeudamiento Global (Session State)
+    d_cre = st.session_state.datos_credito
+    d_lea = st.session_state.datos_leaseback
+
     for i in range(4):
         clave_s = f"S{i+1}"
+        
+        # Ingresos
         ing_ord_val = data_manual[clave_s].get("ordinarios", 0)
         ing_ex_val = data_manual[clave_s].get("extra", 0)
         
-        # Recuperando el desglose
+        # Desembolsos de Crédito/Leaseback (Semana 1)
+        desembolsos_fin = 0
+        if i == 0:
+            desembolsos_fin += (d_cre["desembolso"] if d_cre["activo"] else 0)
+            desembolsos_fin += (d_lea["desembolso"] if d_lea["activo"] else 0)
+        
+        # Egresos (Desgloses sumados)
         f_serv_val = data_manual[clave_s].get("f_serv", 0)
         f_arr_val = data_manual[clave_s].get("f_arr", 0)
         f_otr_val = data_manual[clave_s].get("f_otr", data_manual[clave_s].get("fijos", 0))
@@ -925,29 +1083,56 @@ def app_flujo_caja():
         n_otr_val = data_manual[clave_s].get("n_otr", 0)
         nom_val = n_sue_val + n_ss_val + n_otr_val
         
-        ingresos_totales = ingreso_semanal_usd_cop + ing_ord_val + ing_ex_val
-        egresos_totales = ap_semanas[i] + gf_val + nom_val
+        # Cuotas Financieras (Semana 4 para prudencia conservadora)
+        cuotas_fin = 0
+        if i == 3:
+            cuotas_fin += (d_cre["cuota"] if d_cre["activo"] else 0)
+            cuotas_fin += (d_lea["cuota"] if d_lea["activo"] else 0)
+
+        ingresos_totales = ingreso_semanal_usd_cop + ing_ord_val + ing_ex_val + desembolsos_fin
+        egresos_totales = ap_semanas[i] + gf_val + nom_val + cuotas_fin
+        
         flujo_neto = ingresos_totales - egresos_totales
         saldo_final = saldo_actual + flujo_neto
         
         tabla_fc.append({
-            "Semana": semanas[i]['label'], "Saldo Inicial": saldo_actual,
-            "+ Cartera USD (20%)": ingreso_semanal_usd_cop, "+ Ing. Ordinarios": ing_ord_val, "+ Ingresos Extra": ing_ex_val,
-            "- CxP Proveedores": ap_semanas[i], "- Gastos Fijos (Total)": gf_val, "- Nómina (Total)": nom_val,
-            "FLUJO NETO": flujo_neto, "SALDO FINAL": saldo_final
+            "Semana": semanas[i]['label'],
+            "Saldo Inicial": saldo_actual,
+            "+ Cartera USD (20%)": ingreso_semanal_usd_cop,
+            "+ Ing. Ordinarios": ing_ord_val,
+            "+ Ingresos Extra": ing_ex_val,
+            "+ Desembolso Créditos": desembolsos_fin,
+            "- CxP Proveedores": ap_semanas[i],
+            "- Gastos Fijos (Total)": gf_val,
+            "- Nómina (Total)": nom_val,
+            "- Pago Deuda (Cuotas)": cuotas_fin,
+            "FLUJO NETO": flujo_neto,
+            "SALDO FINAL": saldo_final
         })
         saldo_actual = saldo_final
 
     df_fc = pd.DataFrame(tabla_fc)
-    st.dataframe(df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"}).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']), use_container_width=True)
+    
+    st.dataframe(
+        df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"})
+             .map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']),
+        use_container_width=True
+    )
 
+    # =========================
+    # GRÁFICA COMBINADA 
+    # =========================
     st.markdown("### 4. Gráfica de Flujo de Caja")
+    
     fig_fc, ax_fc = plt.subplots(figsize=(12, 5))
+    
     x_labels = [row["Semana"] for row in tabla_fc]
     netos = [row["FLUJO NETO"] for row in tabla_fc]
     saldos = [row["SALDO FINAL"] for row in tabla_fc]
     
-    ax_fc.bar(x_labels, netos, color=["#50E3C2" if val >= 0 else "#E15554" for val in netos], alpha=0.8, label="Flujo Neto")
+    colores_barras = ["#50E3C2" if val >= 0 else "#E15554" for val in netos]
+    
+    bars = ax_fc.bar(x_labels, netos, color=colores_barras, alpha=0.8, label="Flujo Neto")
     ax_fc.axhline(0, color='black', linewidth=1.2)
     ax_fc.set_ylabel("Flujo Neto (COP)", fontweight='bold')
     ax_fc.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
@@ -956,17 +1141,86 @@ def app_flujo_caja():
     ax_saldo = ax_fc.twinx()
     ax_saldo.plot(x_labels, saldos, color="#4A90E2", marker="o", linewidth=3, markersize=8, label="Saldo Final (Liquidez)")
     ax_saldo.set_ylabel("Saldo Final Acumulado (COP)", color="#4A90E2", fontweight='bold')
+    ax_saldo.tick_params(axis="y", labelcolor="#4A90E2")
     ax_saldo.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
     ax_saldo.spines['top'].set_visible(False)
     
-    l1, lab1 = ax_fc.get_legend_handles_labels()
-    l2, lab2 = ax_saldo.get_legend_handles_labels()
-    ax_fc.legend(l1 + l2, lab1 + lab2, loc="upper left")
+    lines_1, labels_1 = ax_fc.get_legend_handles_labels()
+    lines_2, labels_2 = ax_saldo.get_legend_handles_labels()
+    ax_fc.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
+    
+    plt.title("Evolución del Flujo Neto Semanal vs Saldo en Bancos", fontsize=14, pad=15)
     fig_fc.tight_layout()
     st.pyplot(fig_fc, clear_figure=True)
 
+
 # =========================
-# APP 4: SIMULADOR DE CICLO DE CAJA (ESTRATEGIA)
+# APP 4: ANÁLISIS DE ENDEUDAMIENTO Y CAPEX
+# =========================
+def app_endeudamiento_capex():
+    st.title("🏦 Análisis de Endeudamiento y CAPEX")
+    st.markdown("Simula el impacto de créditos de capital de trabajo y Leaseback de activos fijos.")
+
+    ibr_ea = st.sidebar.number_input("IBR Efectiva Anual (%)", value=12.5) / 100
+
+    t1, t2 = st.tabs(["💰 Crédito Capital de Trabajo", "🏗️ Leaseback de Maquinaria"])
+
+    with t1:
+        st.subheader("Simulación Crédito Corto Plazo")
+        colA, colB = st.columns(2)
+        with colA:
+            monto = st.number_input("Monto del Crédito (COP)", value=0, step=10000000)
+            plazo = st.slider("Plazo (Meses)", 1, 6, 3)
+        with colB:
+            tipo_tasa = st.radio("Tipo de Tasa", ["Fija", "Variable (IBR + Spread)"])
+            if tipo_tasa == "Fija":
+                tasa_final_ea = st.number_input("Tasa Fija E.A. (%)", value=18.0) / 100
+            else:
+                spread = st.number_input("Spread E.A. (%)", value=5.0) / 100
+                tasa_final_ea = ibr_ea + spread
+                st.caption(f"Tasa Combinada: **{tasa_final_ea:.2%} E.A.**")
+
+        cuota = calcular_cuota_mensual(monto, tasa_final_ea, plazo)
+        st.info(f"**Resultado:** Desembolso de **${monto:,.0f}** con una cuota mensual de **${cuota:,.0f}**")
+        
+        if st.button("🚀 Aplicar al Flujo de Caja", key="btn_cre"):
+            st.session_state.datos_credito = {"desembolso": monto, "cuota": cuota, "activo": True}
+            st.success("Impacto cargado al Flujo de Caja (Ver Semana 1 y 4).")
+        if st.button("Limpiar Crédito", key="btn_cre_clear"):
+            st.session_state.datos_credito = {"desembolso": 0, "cuota": 0, "activo": False}
+            st.success("Crédito retirado del Flujo de Caja.")
+
+    with t2:
+        st.subheader("Estrategia Sale & Leaseback")
+        st.markdown("Lista las máquinas compradas el año pasado para liberar liquidez.")
+        
+        # Tabla de máquinas interactiva
+        df_maquinas = pd.DataFrame([{"Máquina": "Inyectora 1", "Valor": 50000000}, {"Máquina": "Molde A", "Valor": 15000000}])
+        edited_m = st.data_editor(df_maquinas, num_rows="dynamic", use_container_width=True)
+        
+        valor_total_capex = edited_m["Valor"].sum()
+        
+        colC, colD = st.columns(2)
+        with colC:
+            plazo_l = st.slider("Plazo Leaseback (Años)", 5, 10, 7)
+            spread_l = st.number_input("Spread Leaseback E.A. (%)", value=4.0) / 100
+        with colD:
+            tasa_l_ea = ibr_ea + spread_l
+            st.metric("Total Liquidez Liberada", f"${valor_total_capex:,.0f}")
+            st.caption(f"Tasa Leaseback: **{tasa_l_ea:.2%} E.A.**")
+
+        cuota_l = calcular_cuota_mensual(valor_total_capex, tasa_l_ea, plazo_l * 12)
+        st.warning(f"**Impacto:** Recibes **${valor_total_capex:,.0f}** hoy, pero pagas un canon de **${cuota_l:,.0f}** mensual.")
+
+        if st.button("🏗️ Aplicar Leaseback al Flujo", key="btn_lea"):
+            st.session_state.datos_leaseback = {"desembolso": valor_total_capex, "cuota": cuota_l, "activo": True}
+            st.success("Leaseback integrado al modelo de caja.")
+        if st.button("Limpiar Leaseback", key="btn_lea_clear"):
+            st.session_state.datos_leaseback = {"desembolso": 0, "cuota": 0, "activo": False}
+            st.success("Leaseback retirado del Flujo de Caja.")
+
+# =========================
+# APP 5: SIMULADOR ESTRATÉGICO CCC
 # =========================
 def app_simulador_ccc():
     st.title("🔄 Simulador de Ciclo de Conversión de Efectivo (CCC)")
@@ -1042,10 +1296,10 @@ def app_simulador_ccc():
 # MENÚ PRINCIPAL
 # =========================
 def main():
-    st.sidebar.title("Navegación")
+    st.sidebar.title("Navegación Pro")
     app_seleccionada = st.sidebar.radio(
         "¿Qué aplicación quieres utilizar?",
-        ("Diferencia en cambio", "Revisar facturas de compras", "Flujo de Caja a 4 Semanas", "Simulador Estratégico CCC")
+        ("Diferencia en cambio", "Revisar facturas de compras", "Flujo de Caja a 4 Semanas", "Endeudamiento y CAPEX", "Simulador Estratégico CCC")
     )
     
     st.sidebar.markdown("---")
@@ -1056,6 +1310,8 @@ def main():
         app_facturas_compras()
     elif app_seleccionada == "Flujo de Caja a 4 Semanas":
         app_flujo_caja()
+    elif app_seleccionada == "Endeudamiento y CAPEX":
+        app_endeudamiento_capex()
     elif app_seleccionada == "Simulador Estratégico CCC":
         app_simulador_ccc()
         
