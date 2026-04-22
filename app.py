@@ -568,7 +568,13 @@ def app_facturas_compras(compras_files):
 def obtener_semanas_fc():
     hoy = pd.Timestamp.today().normalize()
     lunes = hoy - pd.Timedelta(days=hoy.weekday())
-    return [{"idx": i, "start": lunes + pd.Timedelta(days=7*i), "end": lunes + pd.Timedelta(days=7*i+6), "label": f"Sem {i+1} ({ (lunes + pd.Timedelta(days=7*i)).strftime('%d/%m')} - { (lunes + pd.Timedelta(days=7*i+6)).strftime('%d/%m')})"} for i in range(4)]
+    semanas = []
+    for i in range(4):
+        start = lunes + pd.Timedelta(days=7*i)
+        end = start + pd.Timedelta(days=6)
+        label = f"Sem {i+1} ({start.strftime('%d/%m')} - {end.strftime('%d/%m')})"
+        semanas.append({"idx": i, "start": start, "end": end, "label": label})
+    return semanas
 
 def cargar_datos_manuales():
     if os.path.exists("flujo_caja_manual.json"):
@@ -581,9 +587,15 @@ def guardar_datos_manuales(data):
 def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     st.title("💸 Flujo de Caja a 4 Semanas")
     hoy_dt = pd.Timestamp.today()
-    puede_editar = (hoy_dt.weekday() in [0, 1]) or st.checkbox("⚙️ Forzar Edición (Admin)")
+    es_dia_edicion = hoy_dt.weekday() in [0, 1]
 
+    col1, col2 = st.columns(2)
+    with col1: st.info(f"📅 Hoy es: **{hoy_dt.strftime('%A, %d de %B')}**")
+    with col2: forzar_edicion = st.checkbox("⚙️ Forzar Edición (Modo Admin)")
+
+    puede_editar = es_dia_edicion or forzar_edicion
     if not puede_editar: st.warning("🔒 **Modo Lectura Activo:** Edición habilitada Lunes y Martes.")
+
     if not (f_usd and f_compras):
         st.info("👈 Sube los archivos de CxC (USD) y CxP (COP) en la barra lateral.")
         return
@@ -683,8 +695,8 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
 def app_endeudamiento_capex():
     st.title("🏦 Análisis de Endeudamiento y CAPEX")
     ibr_ea = st.sidebar.number_input("IBR Efectiva Anual (%)", value=12.5) / 100
-    t1, t2 = st.tabs(["💰 Crédito Capital de Trabajo", "🏗️ Leaseback de Maquinaria"])
 
+    t1, t2 = st.tabs(["💰 Crédito Capital de Trabajo", "🏗️ Leaseback de Maquinaria"])
     with t1:
         st.subheader("Simulación Crédito Corto Plazo")
         colA, colB = st.columns(2)
@@ -750,7 +762,6 @@ def app_simulador_ccc():
     r2.metric("Venta Promedio Diaria", f"${ventas_diarias:,.0f}")
     r3.metric("💰 Capital de Trabajo Liberado", f"${caja_liberada:,.0f}")
 
-
 # =========================
 # APP 6: RESUMEN EJECUTIVO (PDF)
 # =========================
@@ -758,21 +769,15 @@ def generar_pdf_gerencial(kpis, df_deuda, fig_liquidez) -> bytes:
     if FPDF is None: return None
     pdf = FPDF()
     pdf.add_page()
-    
-    # Título
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(200, 10, txt="Reporte Gerencial - Tesoreria y Liquidez", ln=1, align='C')
     pdf.ln(10)
-    
-    # Indicadores
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(200, 10, txt="1. Indicadores de Salud Financiera Inmediata", ln=1)
     pdf.set_font("Arial", '', 11)
     for k, v in kpis.items():
         pdf.cell(200, 8, txt=f"- {k}: {v}", ln=1)
     pdf.ln(10)
-    
-    # Deuda
     if not df_deuda.empty:
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(200, 10, txt="2. Resumen de Deuda y Financiacion (Corto Plazo)", ln=1)
@@ -780,14 +785,11 @@ def generar_pdf_gerencial(kpis, df_deuda, fig_liquidez) -> bytes:
         for _, row in df_deuda.iterrows():
             pdf.cell(200, 8, txt=f"- {row['Tipo']}: Desembolso ${row['Desembolso']:,.0f} | Cuota: ${row['Cuota Mensual']:,.0f}", ln=1)
         pdf.ln(10)
-            
-    # Insertar Gráfica
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(200, 10, txt="3. Composicion de Liquidez vs Deuda", ln=1)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
         fig_liquidez.savefig(tmpfile.name, format="png", bbox_inches="tight")
         pdf.image(tmpfile.name, x=30, y=pdf.get_y(), w=150)
-        
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
         pdf.output(pdf_file.name)
         with open(pdf_file.name, "rb") as f:
@@ -796,7 +798,6 @@ def generar_pdf_gerencial(kpis, df_deuda, fig_liquidez) -> bytes:
 
 def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
     st.title("📈 Resumen Ejecutivo y Reporte Gerencial")
-    
     if not (f_usd and f_compras):
         st.warning("⚠️ Sube los archivos de CxC (USD) y CxP (COP) en la barra lateral para ver tus KPIs.")
         return
@@ -828,7 +829,6 @@ def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
     k3.metric("Total Activo Líquido", f"${activo_total_liquido:,.0f}")
     k4.metric("Cartera Vencida (CxP)", f"{porcentaje_vencido:.1%}")
 
-    # Preparar gráfica para PDF
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.bar(["Activo Líquido", "Pasivo Corriente"], [activo_total_liquido, pasivo_corriente_cxp], color=["#50E3C2", "#E15554"])
     ax.set_title("Cobertura de Corto Plazo")
@@ -840,7 +840,7 @@ def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
     st.subheader("📥 Exportar Reporte en PDF")
     
     if FPDF is None:
-        st.error("⚠️ Para generar el PDF, instala la librería ejecutando: `pip install fpdf` en tu terminal.")
+        st.error("⚠️ Instala la librería ejecutando: `pip install fpdf` en tu terminal, y reinicia streamlit (`Ctrl+C` y luego `streamlit run app.py`).")
     else:
         kpis_dict = {
             "Capital de Trabajo Neto": formato_pesos(capital_trabajo_neto),
@@ -849,7 +849,6 @@ def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
             "Total Pasivo Corto Plazo (CxP)": formato_pesos(pasivo_corriente_cxp),
             "Porcentaje de Deuda Vencida": f"{porcentaje_vencido:.1%}"
         }
-        
         deuda_activa = []
         if st.session_state.datos_credito["activo"]:
             deuda_activa.append({"Tipo": "Crédito Cap. Trabajo", "Desembolso": st.session_state.datos_credito["desembolso"], "Cuota Mensual": st.session_state.datos_credito["cuota"]})
@@ -857,17 +856,28 @@ def app_resumen_ejecutivo(f_usd, m_usd, f_compras):
             deuda_activa.append({"Tipo": "Leaseback Operativo", "Desembolso": st.session_state.datos_leaseback["desembolso"], "Cuota Mensual": st.session_state.datos_leaseback["cuota"]})
         
         pdf_bytes = generar_pdf_gerencial(kpis_dict, pd.DataFrame(deuda_activa), fig)
-        
-        st.download_button(
-            label="📄 Descargar Reporte Gerencial (PDF)",
-            data=pdf_bytes,
-            file_name="Reporte_Gerencial_Tesoreria.pdf",
-            mime="application/pdf"
-        )
+        st.download_button("📄 Descargar Reporte Gerencial (PDF)", data=pdf_bytes, file_name="Reporte_Gerencial_Tesoreria.pdf", mime="application/pdf")
 
 # =========================
-# APP 7: LECTOR DE ESTADOS FINANCIEROS (NUEVO MÓDULO)
+# APP 7: LECTOR DE ESTADOS FINANCIEROS (NUEVO)
 # =========================
+def limpiar_y_extraer_ultimo_numero(val):
+    if pd.isna(val): return None
+    s = str(val).strip()
+    if not any(c.isdigit() for c in s): return None
+    
+    # Separar por espacios o símbolos de peso por si el Excel unió varias columnas en una
+    partes = s.replace("$", " ").replace("\n", " ").split()
+    for parte in reversed(partes):
+        if any(c.isdigit() for c in parte):
+            # Limpiar formato colombiano: 8.029.923.801,00 -> 8029923801.00
+            p = parte.replace(".", "")
+            if "," in p: p = p.replace(",", ".")
+            p = ''.join(c for c in p if c.isdigit() or c == '.')
+            try: return float(p)
+            except ValueError: continue
+    return None
+
 def app_analisis_financiero():
     st.title("📑 Análisis de Estados Financieros (Lector Automático)")
     st.markdown("Sube tu archivo de **Estado de Situación Financiera Completo** (Excel o CSVs) para extraer KPIs contables bajo norma NIIF/IFRS.")
@@ -876,7 +886,6 @@ def app_analisis_financiero():
     
     if eeff_files:
         try:
-            # Diccionario de palabras clave NIIF a buscar en las filas
             keywords = {
                 "Activo Corriente": ["ACTIVO CORRIENTE", "ACTIVOS CORRIENTES"],
                 "Pasivo Corriente": ["PASIVO CORRIENTE", "TOTAL PASIVO CORRIENTE"],
@@ -891,11 +900,9 @@ def app_analisis_financiero():
             
             valores = {k: 0.0 for k in keywords}
             
-            # Recorrer archivos subidos
             for eeff_file in eeff_files:
-                # Soporte para CSV o Excel
                 if eeff_file.name.endswith('.csv'):
-                    df = pd.read_csv(eeff_file)
+                    df = pd.read_csv(eeff_file, on_bad_lines='skip')
                     dfs = {"Hoja1": df}
                 else:
                     dfs = pd.read_excel(eeff_file, sheet_name=None)
@@ -904,43 +911,41 @@ def app_analisis_financiero():
                     for idx, row in df.iterrows():
                         row_str = " ".join([str(x).upper() for x in row.values if pd.notnull(x)])
                         for key, kw_list in keywords.items():
-                            if valores[key] == 0.0: # Solo tomar el primer hallazgo por concepto
+                            if valores[key] == 0.0:
                                 for kw in kw_list:
                                     if kw in row_str:
-                                        # Extraer todos los números de la fila
-                                        nums = pd.to_numeric(row, errors='coerce').dropna()
-                                        if not nums.empty:
-                                            # Tomar el último número (generalmente la columna de 2025 o año actual)
-                                            valores[key] = abs(float(nums.iloc[-1]))
+                                        # Buscar el número de derecha a izquierda (para sacar el año más reciente)
+                                        for val in reversed(row.values):
+                                            numero = limpiar_y_extraer_ultimo_numero(val)
+                                            if numero is not None:
+                                                valores[key] = abs(numero)
+                                                break
                                         break
             
             st.success("✅ Estados Financieros leídos exitosamente. Generando KPIs...")
             
-            # Cálculos Matemáticos de KPIs
             liq_corriente = valores["Activo Corriente"] / valores["Pasivo Corriente"] if valores["Pasivo Corriente"] > 0 else 0
             nivel_endeudamiento = valores["Pasivo Total"] / valores["Activo Total"] if valores["Activo Total"] > 0 else 0
-            margen_bruto = valores["Utilidad Bruta"] / valores["Ingresos"] if valores["Ingresos"] > 0 else 0
             margen_neto = valores["Utilidad Neta"] / valores["Ingresos"] if valores["Ingresos"] > 0 else 0
             roe = valores["Utilidad Neta"] / valores["Patrimonio"] if valores["Patrimonio"] > 0 else 0
             
-            # Mostrar Dashboard de Resultados
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("### 💧 Liquidez")
-                st.metric("Razón Corriente", f"{liq_corriente:.2f}x", help="Activo Corriente / Pasivo Corriente")
+                st.metric("Razón Corriente", f"{liq_corriente:.2f}x")
                 st.metric("Activo Corriente", formato_pesos(valores["Activo Corriente"]))
                 st.metric("Pasivo Corriente", formato_pesos(valores["Pasivo Corriente"]))
             
             with col2:
                 st.markdown("### ⚖️ Endeudamiento")
-                st.metric("Nivel de Endeudamiento", f"{nivel_endeudamiento:.1%}", help="Pasivo Total / Activo Total")
+                st.metric("Nivel de Endeudamiento", f"{nivel_endeudamiento:.1%}")
                 st.metric("Pasivo Total", formato_pesos(valores["Pasivo Total"]))
                 st.metric("Patrimonio Total", formato_pesos(valores["Patrimonio"]))
                 
             with col3:
                 st.markdown("### 📈 Rentabilidad")
-                st.metric("Margen Neto", f"{margen_neto:.1%}", help="Utilidad Neta / Ingresos")
-                st.metric("ROE (Retorno Patrimonio)", f"{roe:.1%}", help="Utilidad Neta / Patrimonio")
+                st.metric("Margen Neto", f"{margen_neto:.1%}")
+                st.metric("ROE (Retorno Patrimonio)", f"{roe:.1%}")
                 st.metric("Ingresos Anuales", formato_pesos(valores["Ingresos"]))
                 
             st.markdown("---")
