@@ -578,10 +578,56 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                 c6.metric("Dif. día base", f"${dif_dia_base_total:,.2f}")
                 c7.metric(f"Dif. día +{spread:.1%}", f"${dif_dia_plus_total:,.2f}")
                 c8.metric(f"Dif. día -{spread:.1%}", f"${dif_dia_minus_total:,.2f}")
-                
+
                 tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Gráficas Generales", "Factura Individual", "Descarga"])
-                with tab1: 
-                    st.dataframe(df_facturadas, use_container_width=True)
+                with tab1:
+                    st.subheader("📋 Monitor de Causación Mensual (NIIF)")
+                    st.markdown("""
+                    * **No Realizada (Mes):** Impacto neto en el P&L de este mes (TRM Hoy vs. Cierre Mes Anterior).
+                    * **No Realizada (Histórica):** Valorización total desde que se emitió la factura.
+                    """)
+
+                    # Seleccionamos y renombramos columnas para que sean legibles
+                    df_visual = df_facturadas[[
+                        "factura", "cliente", "saldo_vivo_actual_usd", 
+                        "dif_no_realizada_mes", "dif_no_realizada"
+                    ]].copy()
+
+                    df_visual.columns = [
+                        "Factura", "Cliente", "Saldo Vivo (USD)", 
+                        "Efecto P&L Mes (COP)", "Efecto Total Acum. (COP)"
+                    ]
+
+                    # Aplicamos estilos de color: Verde para ganancia, Rojo para pérdida
+                    def color_pnl(val):
+                        color = 'red' if val < 0 else 'green'
+                        return f'color: {color}'
+
+                    st.dataframe(
+                        df_visual.style.format({
+                            "Saldo Vivo (USD)": "${:,.2f}",
+                            "Efecto P&L Mes (COP)": "${:,.0f}",
+                            "Efecto Total Acum. (COP)": "${:,.0f}"
+                        }).map(color_pnl, subset=["Efecto P&L Mes (COP)", "Efecto Total Acum. (COP)"]),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    # --- Visual Adicional: Gráfico de barras por Factura ---
+                    st.markdown("---")
+                    st.caption("📊 Comparativa de Impactos por Factura (Top 10)")
+                    
+                    # Graficamos el Top 10 de facturas con más saldo para comparar los dos efectos
+                    df_chart = df_visual.nlargest(10, "Saldo Vivo (USD)")
+                    fig_comp, ax_comp = plt.subplots(figsize=(10, 4))
+                    
+                    df_chart.plot(kind='bar', x='Factura', y=['Efecto P&L Mes (COP)', 'Efecto Total Acum. (COP)'], 
+                                 ax=ax_comp, color=['#3498db', '#2980b9'])
+                    
+                    ax_comp.set_title("Impacto Mensual vs. Acumulado")
+                    ax_comp.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+                    plt.xticks(rotation=45)
+                    st.pyplot(fig_comp)
                 with tab2:
                     if not serie_total.empty:
                         st.pyplot(fig_trm(serie_total), clear_figure=True)
