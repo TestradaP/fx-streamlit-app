@@ -514,8 +514,11 @@ def fig_factura_individual(serie_factura, factura, dif_total_actual, dif_dia_bas
 # =========================
 # MÓDULO 1: UI DIFERENCIA EN CAMBIO
 # =========================
+# =========================
+# MÓDULO 1: UI DIFERENCIA EN CAMBIO (MEJORADA)
+# =========================
 def app_diferencia_cambio(facturas_file, monetizaciones_file):
-    st.title("💱 Diferencia en cambio - Cartera en USD (CxC)")
+    st.title("💱 Diferencia en cambio - Cartera en USD")
     spread = st.sidebar.number_input("Spread bancario (escenarios)", min_value=0.0, max_value=0.20, value=SPREAD_POR_DEFECTO, step=0.005, format="%.3f")
 
     if facturas_file is not None:
@@ -523,6 +526,7 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
             df_facturas = cargar_facturas(facturas_file)
             df_monetizaciones = cargar_monetizaciones(monetizaciones_file)
             
+            # Fecha inicial inteligente
             fecha_inicial = obtener_fecha_inicial_trm(df_facturas, df_monetizaciones)
             fecha_final = pd.Timestamp.today().normalize()
 
@@ -533,6 +537,7 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
             trm_actual = float(df_trm["trm"].iloc[-1])
             trm_ayer = float(df_trm["trm"].iloc[-2]) if len(df_trm) > 1 else trm_actual
 
+            # Cálculos (Asegurarse de pasar df_trm para la causación mensual)
             detalle_actual = calcular_resumen_actual(df_facturas, df_monetizaciones, trm_actual, trm_ayer, spread, df_trm)
             serie_total, detalle_diario = construir_serie_total(df_facturas, df_monetizaciones, df_trm)
 
@@ -553,30 +558,43 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                 saldo_total_actual_usd = float(df_facturadas["saldo_vivo_actual_usd"].sum())
                 dif_no_realizada_mes_total = float(df_facturadas["dif_no_realizada_mes"].sum())
 
-                c1, c2, c3, c4, c5 = st.columns(5)
+                # --- REPARACIÓN: GRID 4x2 PARA QUE LOS NÚMEROS NO SE CORTEN ---
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("TRM actual", f"${trm_actual:,.2f}")
                 c2.metric("Saldo vivo USD", f"${saldo_total_actual_usd:,.2f}")
                 c3.metric("Realizada (Total)", f"${float((df_facturadas['dif_anticipos'] + df_facturadas['dif_realizada_post']).sum()):,.0f}")
                 c4.metric("No Realizada (Mes)", f"${dif_no_realizada_mes_total:,.0f}", help="Causación NIIF mes actual")
-                c5.metric("No Realizada (Hist.)", f"${float(df_facturadas['dif_no_realizada'].sum()):,.0f}")
 
-                c6, c7, c8 = st.columns(3)
+                c5, c6, c7, c8 = st.columns(4)
+                c5.metric("No Realizada (Hist.)", f"${float(df_facturadas['dif_no_realizada'].sum()):,.0f}")
                 c6.metric("Dif. día base", f"${float(df_facturadas['dif_dia_base'].sum()):,.0f}")
                 c7.metric(f"Dif. día +{spread:.1%}", f"${float(df_facturadas['dif_dia_plus_2pct'].sum()):,.0f}")
                 c8.metric(f"Dif. día -{spread:.1%}", f"${float(df_facturadas['dif_dia_minus_2pct'].sum()):,.0f}")
+                # -----------------------------------------------------------------
 
-                tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Gráficas Generales", "Factura Individual", "Descarga"])
+                tab1, tab2, tab3, tab4 = st.tabs(["📊 Monitor de Causación", "📈 Gráficas Históricas", "🔍 Detalle por Factura", "📥 Descarga"])
                 
                 with tab1:
-                    st.subheader("📋 Monitor de Causación Mensual (NIIF)")
-                    df_visual = df_facturadas[["factura", "cliente", "saldo_vivo_actual_usd", "dif_no_realizada_mes", "dif_no_realizada"]].copy()
-                    df_visual.columns = ["Factura", "Cliente", "Saldo (USD)", "Efecto Mes (COP)", "Efecto Total (COP)"]
+                    st.subheader("📋 Estado de Cartera y Efecto P&L")
+                    
+                    # Preparamos el DataFrame visual con nombres claros
+                    df_vis = df_facturadas[[
+                        "factura", "cliente", "saldo_vivo_actual_usd", 
+                        "dif_realizada_post", "dif_no_realizada_mes", "dif_no_realizada"
+                    ]].copy()
+                    
+                    df_vis.columns = [
+                        "Factura", "Cliente", "Saldo (USD)", 
+                        "Dif. Realizada (COP)", "Efecto Mes (COP)", "Efecto Acum. (COP)"
+                    ]
 
+                    # Configuración de columnas para evitar que se corten los números
                     st.dataframe(
-                        df_visual.style.format({
+                        df_vis.style.format({
                             "Saldo (USD)": "{:,.2f}",
+                            "Dif. Realizada (COP)": "{:,.0f}",
                             "Efecto Mes (COP)": "{:,.0f}",
-                            "Efecto Total (COP)": "{:,.0f}"
+                            "Efecto Acum. (COP)": "{:,.0f}"
                         }),
                         use_container_width=True,
                         hide_index=True,
@@ -584,40 +602,38 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
                             "Factura": st.column_config.TextColumn(width="small"),
                             "Cliente": st.column_config.TextColumn(width="medium"),
                             "Saldo (USD)": st.column_config.NumberColumn(format="$ %.2f", width="medium"),
+                            "Dif. Realizada (COP)": st.column_config.NumberColumn(format="$ %d", width="large"),
                             "Efecto Mes (COP)": st.column_config.NumberColumn(format="$ %d", width="large"),
-                            "Efecto Total (COP)": st.column_config.NumberColumn(format="$ %d", width="large"),
+                            "Efecto Acum. (COP)": st.column_config.NumberColumn(format="$ %d", width="large"),
                         }
                     )
 
-                    st.markdown("---")
-                    st.caption("📊 Comparativa de Impactos por Factura (Top 10 con más Saldo)")
-                    df_chart = df_visual.nlargest(10, "Saldo (USD)")
-                    fig_comp, ax_comp = plt.subplots(figsize=(10, 4))
-                    df_chart.plot(kind='bar', x='Factura', y=['Efecto Mes (COP)', 'Efecto Total (COP)'], ax=ax_comp, color=['#3498db', '#2c3e50'])
-                    ax_comp.set_title("Impacto Mensual vs. Acumulado")
-                    ax_comp.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
-                    plt.xticks(rotation=45)
-                    st.pyplot(fig_comp)
-
                 with tab2:
                     if not serie_total.empty:
-                        st.pyplot(fig_trm_y_diferencia_total(serie_total, dif_total_actual), clear_figure=True)
+                        st.pyplot(fig_trm_y_diferencia_total(serie_total, float(df_facturadas["dif_total"].sum())), clear_figure=True)
                         st.pyplot(fig_pnl_dia(serie_total), clear_figure=True)
+                
                 with tab3:
-                    factura_sel = st.selectbox("Selecciona una factura", options=sorted(df_facturadas["factura"].astype(str).unique().tolist()))
+                    factura_sel = st.selectbox("Buscar factura específica:", options=sorted(df_facturadas["factura"].astype(str).unique().tolist()))
                     if factura_sel:
                         fila = df_facturadas[df_facturadas["factura"] == factura_sel].iloc[0]
+                        col_opt1, col_opt2 = st.columns(2)
+                        with col_opt1: mostrar_etiquetas = st.checkbox("Mostrar etiquetas de monetizaciones", value=True)
+                        with col_opt2: umbral_etiqueta_usd = st.number_input("Etiquetar movimientos > USD", min_value=0.0, step=500.0)
+
                         serie_f = construir_serie_factura(fila, df_monetizaciones, df_trm)
                         if not serie_f.empty:
-                            st.pyplot(fig_factura_individual(serie_f, factura_sel, float(fila["dif_total"]), float(fila["dif_dia_base"]), df_monetizaciones, fila), clear_figure=True)
+                            st.pyplot(fig_factura_individual(serie_f, factura_sel, float(fila["dif_total"]), float(fila["dif_dia_base"]), df_monetizaciones, fila, mostrar_etiquetas, umbral_etiqueta_usd), clear_figure=True)
+                
                 with tab4:
                     excel_bytes = exportar_resultados_excel(detalle_actual, serie_total, detalle_diario)
-                    st.download_button("Descargar Excel General", data=excel_bytes, file_name="diferencia_cambio.xlsx")
-            else: 
+                    st.download_button("💾 Descargar Matriz Completa (Excel)", data=excel_bytes, file_name="diferencia_cambio_pro.xlsx")
+
+            else:
                 st.info("No hay facturas con fecha registrada.")
-        except Exception as e: 
-            st.error(f"Error procesando la información: {e}")
-    else: 
+        except Exception as e:
+            st.error(f"Error en el procesamiento: {e}")
+    else:
         st.info("👈 Sube Cuentas por Cobrar (CxC USD) en la barra lateral.")
 # =========================
 # MÓDULO 2: UI FACTURAS DE COMPRAS Y PAGOS
