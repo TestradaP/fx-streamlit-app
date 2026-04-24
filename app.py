@@ -638,6 +638,9 @@ def app_diferencia_cambio(facturas_file, monetizaciones_file):
 # =========================
 # MÓDULO 2: UI FACTURAS DE COMPRAS Y PAGOS
 # =========================
+# =========================
+# MÓDULO 2: UI FACTURAS DE COMPRAS Y PAGOS (CON TOP PROVEEDORES)
+# =========================
 def app_facturas_compras(compras_files):
     st.title("🛒 Dashboard de Facturas de Compras")
     if not compras_files:
@@ -684,8 +687,39 @@ def app_facturas_compras(compras_files):
 
         st.dataframe(df_filtrado[["PROVEEDOR", "FACTURA", "VALOR", "VENCIMIENTO", "RIESGO"]], use_container_width=True)
 
+        # --- ¡NUEVO! TOP PROVEEDORES POR VALOR ADEUDADO ---
         st.markdown("---")
-        st.subheader("📌 Análisis por Grupo de Proveedores")
+        st.subheader("🏆 Top 10 Proveedores (Concentración de Deuda)")
+        
+        df_top_prov = df_filtrado.groupby("PROVEEDOR", as_index=False)["VALOR"].sum()
+        df_top_prov = df_top_prov.sort_values(by="VALOR", ascending=False).head(10)
+        
+        col_grafica, col_tabla = st.columns([2, 1])
+        
+        with col_grafica:
+            fig_top, ax_top = plt.subplots(figsize=(8, 4))
+            df_top_prov_rev = df_top_prov.iloc[::-1] # Invertir para que el mayor quede arriba
+            ax_top.barh(df_top_prov_rev["PROVEEDOR"], df_top_prov_rev["VALOR"], color="#3498db")
+            ax_top.set_xlabel("Valor Adeudado (COP)")
+            ax_top.xaxis.set_major_formatter(FuncFormatter(formato_pesos))
+            ax_top.spines['top'].set_visible(False)
+            ax_top.spines['right'].set_visible(False)
+            st.pyplot(fig_top, clear_figure=True)
+            
+        with col_tabla:
+            st.dataframe(
+                df_top_prov.style.format({"VALOR": "${:,.0f}"}),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "PROVEEDOR": st.column_config.TextColumn("Proveedor"),
+                    "VALOR": st.column_config.NumberColumn("Deuda Total")
+                }
+            )
+        # ---------------------------------------------------
+
+        st.markdown("---")
+        st.subheader("📌 Análisis Detallado por Grupo de Proveedores")
         proveedores_disponibles = sorted(df_filtrado["PROVEEDOR"].unique())
         proveedores_sel = st.multiselect("Selecciona uno o varios proveedores para agrupar:", options=proveedores_disponibles)
 
@@ -735,7 +769,6 @@ def app_facturas_compras(compras_files):
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df_all[df_all["FACTURA"].isin(facturas_sel["FACTURA"])].drop(columns=['MES_GENERACION', 'VENCIDA', 'DIAS_VENCIDA', 'DIAS_PARA_VENCER', 'PROXIMO_A_VENCER', 'RIESGO'], errors='ignore').to_excel(writer, index=False)
             st.download_button("⬇️ Descargar Archivo de Pagos", data=output.getvalue(), file_name="pagos_realizados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
 
 # =========================
 # MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
