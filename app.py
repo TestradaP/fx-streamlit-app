@@ -771,11 +771,7 @@ def app_facturas_compras(compras_files):
             st.download_button("⬇️ Descargar Archivo de Pagos", data=output.getvalue(), file_name="pagos_realizados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # =========================
-# MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
-# =========================
-
-# =========================
-# MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS
+# MÓDULO 3: UI FLUJO DE CAJA A 4 SEMANAS (CON CIERRE REAL)
 # =========================
 def obtener_semanas_fc():
     hoy = pd.Timestamp.today().normalize()
@@ -784,8 +780,13 @@ def obtener_semanas_fc():
 
 def cargar_datos_manuales():
     if os.path.exists("flujo_caja_manual.json"):
-        with open("flujo_caja_manual.json", "r") as f: return json.load(f)
-    return {"saldo_inicial": 0, "S1": {}, "S2": {}, "S3": {}, "S4": {}}
+        with open("flujo_caja_manual.json", "r") as f: 
+            data = json.load(f)
+            # Aseguramos que la llave del histórico exista en JSON viejos
+            if "historico" not in data:
+                data["historico"] = []
+            return data
+    return {"saldo_inicial": 0, "S1": {}, "S2": {}, "S3": {}, "S4": {}, "historico": []}
 
 def guardar_datos_manuales(data):
     with open("flujo_caja_manual.json", "w") as f: json.dump(data, f)
@@ -800,12 +801,13 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
     with col2: forzar_edicion = st.checkbox("⚙️ Forzar Edición (Modo Admin)")
 
     puede_editar = es_dia_edicion or forzar_edicion
-    if not puede_editar: st.warning("🔒 **Modo Lectura Activo:** Edición habilitada Lunes y Martes.")
+    if not puede_editar: st.warning("🔒 **Modo Lectura Activo:** Edición de proyecciones y cierres habilitada Lunes y Martes.")
 
     if not (f_usd and f_compras):
         st.info("👈 Sube los archivos de CxC (USD) y CxP (COP) en la barra lateral.")
         return
 
+    # --- CÁLCULOS AUTOMÁTICOS ---
     df_usd = cargar_facturas(f_usd)
     df_mon = cargar_monetizaciones(m_usd)
     fecha_inicial = obtener_fecha_inicial_trm(df_usd, df_mon)
@@ -829,101 +831,162 @@ def app_flujo_caja(f_usd, m_usd, f_compras, f_pagos):
             else: ap_semanas[i] = df_compras[(df_compras['VENCIMIENTO'] >= semanas[i]['start']) & (df_compras['VENCIMIENTO'] <= semanas[i]['end'])]['VALOR'].sum()
 
     data_manual = cargar_datos_manuales()
-    with st.form("form_flujo"):
-        saldo_bancos = st.number_input("Saldo Inicial en Bancos (COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
-        cols = st.columns(4)
-        nuevos_datos = {}
-        for i, col in enumerate(cols):
+    
+    # --- PESTAÑAS (PROYECCIÓN VS REAL) ---
+    tab_proy, tab_real = st.tabs(["📅 Proyección a 4 Semanas", "🔒 Cierre Real (Histórico)"])
+    
+    with tab_proy:
+        with st.form("form_flujo"):
+            saldo_bancos = st.number_input("Saldo Inicial en Bancos (COP)", value=float(data_manual.get("saldo_inicial", 0)), disabled=not puede_editar)
+            cols = st.columns(4)
+            nuevos_datos = {}
+            for i, col in enumerate(cols):
+                clave_s = f"S{i+1}"
+                with col:
+                    st.write(f"**{semanas[i]['label']}**")
+                    ing_ord = st.number_input("Ing. Ordinarios", value=float(data_manual[clave_s].get("ordinarios", 0)), key=f"ord_{i}", disabled=not puede_editar)
+                    ing_ex = st.number_input("Ingresos Extra", value=float(data_manual[clave_s].get("extra", 0)), key=f"ex_{i}", disabled=not puede_editar)
+                    f_serv = st.number_input("Servicios Públicos", value=float(data_manual[clave_s].get("f_serv", 0)), key=f"fs_{i}", disabled=not puede_editar)
+                    f_arr = st.number_input("Arriendo", value=float(data_manual[clave_s].get("f_arr", 0)), key=f"fa_{i}", disabled=not puede_editar)
+                    f_otr = st.number_input("Otros Fijos", value=float(data_manual[clave_s].get("f_otr", 0)), key=f"fo_{i}", disabled=not puede_editar)
+                    n_sue = st.number_input("Sueldos Netos", value=float(data_manual[clave_s].get("n_sue", 0)), key=f"ns_{i}", disabled=not puede_editar)
+                    n_ss = st.number_input("Seguridad Social", value=float(data_manual[clave_s].get("n_ss", 0)), key=f"nss_{i}", disabled=not puede_editar)
+                    nuevos_datos[clave_s] = {"ordinarios": ing_ord, "extra": ing_ex, "f_serv": f_serv, "f_arr": f_arr, "f_otr": f_otr, "n_sue": n_sue, "n_ss": n_ss, "n_otr": 0}
+
+            if st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar):
+                data_manual["saldo_inicial"] = saldo_bancos
+                data_manual.update(nuevos_datos)
+                guardar_datos_manuales(data_manual)
+                st.success("¡Proyección guardada con éxito!")
+
+        st.subheader("📊 Resultado Flujo de Caja (Proyectado)")
+        tabla_fc = []
+        saldo_actual = data_manual.get("saldo_inicial", 0)
+        
+        d_cre = st.session_state.get("datos_credito", {"desembolso": 0, "cuota": 0, "activo": False})
+        d_lea = st.session_state.get("datos_leaseback", {"desembolso": 0, "cuota": 0, "activo": False})
+
+        for i in range(4):
             clave_s = f"S{i+1}"
-            with col:
-                st.write(f"**{semanas[i]['label']}**")
-                ing_ord = st.number_input("Ing. Ordinarios", value=float(data_manual[clave_s].get("ordinarios", 0)), key=f"ord_{i}", disabled=not puede_editar)
-                ing_ex = st.number_input("Ingresos Extra", value=float(data_manual[clave_s].get("extra", 0)), key=f"ex_{i}", disabled=not puede_editar)
-                f_serv = st.number_input("Servicios Públicos", value=float(data_manual[clave_s].get("f_serv", 0)), key=f"fs_{i}", disabled=not puede_editar)
-                f_arr = st.number_input("Arriendo", value=float(data_manual[clave_s].get("f_arr", 0)), key=f"fa_{i}", disabled=not puede_editar)
-                f_otr = st.number_input("Otros Fijos", value=float(data_manual[clave_s].get("f_otr", 0)), key=f"fo_{i}", disabled=not puede_editar)
-                n_sue = st.number_input("Sueldos Netos", value=float(data_manual[clave_s].get("n_sue", 0)), key=f"ns_{i}", disabled=not puede_editar)
-                n_ss = st.number_input("Seguridad Social", value=float(data_manual[clave_s].get("n_ss", 0)), key=f"nss_{i}", disabled=not puede_editar)
-                nuevos_datos[clave_s] = {"ordinarios": ing_ord, "extra": ing_ex, "f_serv": f_serv, "f_arr": f_arr, "f_otr": f_otr, "n_sue": n_sue, "n_ss": n_ss, "n_otr": 0}
-
-        if st.form_submit_button("💾 Guardar Proyección", disabled=not puede_editar):
-            data_manual["saldo_inicial"] = saldo_bancos
-            data_manual.update(nuevos_datos)
-            guardar_datos_manuales(data_manual)
-            st.success("¡Datos guardados!")
-
-    st.subheader("📊 Resultado Flujo de Caja")
-    tabla_fc = []
-    saldo_actual = data_manual.get("saldo_inicial", 0)
-    
-    d_cre = st.session_state.get("datos_credito", {"desembolso": 0, "cuota": 0, "activo": False})
-    d_lea = st.session_state.get("datos_leaseback", {"desembolso": 0, "cuota": 0, "activo": False})
-
-    for i in range(4):
-        clave_s = f"S{i+1}"
-        ing_ord_val = data_manual[clave_s].get("ordinarios", 0)
-        ing_ex_val = data_manual[clave_s].get("extra", 0)
-        
-        desembolsos_fin = 0
-        if i == 0:
-            desembolsos_fin += (d_cre["desembolso"] if d_cre["activo"] else 0)
-            desembolsos_fin += (d_lea["desembolso"] if d_lea["activo"] else 0)
+            ing_ord_val = data_manual[clave_s].get("ordinarios", 0)
+            ing_ex_val = data_manual[clave_s].get("extra", 0)
             
-        gf_val = data_manual[clave_s].get("f_serv", 0) + data_manual[clave_s].get("f_arr", 0) + data_manual[clave_s].get("f_otr", 0)
-        nom_val = data_manual[clave_s].get("n_sue", 0) + data_manual[clave_s].get("n_ss", 0)
+            desembolsos_fin = 0
+            if i == 0:
+                desembolsos_fin += (d_cre["desembolso"] if d_cre["activo"] else 0)
+                desembolsos_fin += (d_lea["desembolso"] if d_lea["activo"] else 0)
+                
+            gf_val = data_manual[clave_s].get("f_serv", 0) + data_manual[clave_s].get("f_arr", 0) + data_manual[clave_s].get("f_otr", 0)
+            nom_val = data_manual[clave_s].get("n_sue", 0) + data_manual[clave_s].get("n_ss", 0)
+            
+            cuotas_fin = 0
+            if i == 3:
+                cuotas_fin += (d_cre["cuota"] if d_cre["activo"] else 0)
+                cuotas_fin += (d_lea["cuota"] if d_lea["activo"] else 0)
+
+            ingresos_totales = ingreso_semanal_usd_cop + ing_ord_val + ing_ex_val + desembolsos_fin
+            egresos_totales = ap_semanas[i] + gf_val + nom_val + cuotas_fin
+            flujo_neto = ingresos_totales - egresos_totales
+            saldo_final = saldo_actual + flujo_neto
+            
+            tabla_fc.append({
+                "Semana": semanas[i]['label'], 
+                "Saldo Inicial": saldo_actual,
+                "+ Cartera USD": ingreso_semanal_usd_cop, 
+                "+ Ingresos Op.": ing_ord_val + ing_ex_val,
+                "+ Inyección Financiera": desembolsos_fin,
+                "- Proveedores": ap_semanas[i], 
+                "- Gastos Op.": gf_val + nom_val,
+                "- Pago Deuda (Cuotas)": cuotas_fin,
+                "FLUJO NETO": flujo_neto, 
+                "SALDO FINAL": saldo_final
+            })
+            saldo_actual = saldo_final
+
+        df_fc = pd.DataFrame(tabla_fc)
+        st.dataframe(df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"}).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']), use_container_width=True)
+
+        st.markdown("### 📈 Evolución de Liquidez Proyectada")
+        fig_fc, ax_fc = plt.subplots(figsize=(12, 5))
+        x_labels = [row["Semana"] for row in tabla_fc]
+        netos = [row["FLUJO NETO"] for row in tabla_fc]
+        saldos = [row["SALDO FINAL"] for row in tabla_fc]
         
-        cuotas_fin = 0
-        if i == 3:
-            cuotas_fin += (d_cre["cuota"] if d_cre["activo"] else 0)
-            cuotas_fin += (d_lea["cuota"] if d_lea["activo"] else 0)
-
-        ingresos_totales = ingreso_semanal_usd_cop + ing_ord_val + ing_ex_val + desembolsos_fin
-        egresos_totales = ap_semanas[i] + gf_val + nom_val + cuotas_fin
-        flujo_neto = ingresos_totales - egresos_totales
-        saldo_final = saldo_actual + flujo_neto
+        colores_barras = ["#50E3C2" if val >= 0 else "#E15554" for val in netos]
+        ax_fc.bar(x_labels, netos, color=colores_barras, alpha=0.8, label="Flujo Neto")
+        ax_fc.axhline(0, color='black', linewidth=1.2)
+        ax_fc.set_ylabel("Flujo Neto (COP)", fontweight='bold')
+        ax_fc.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax_fc.spines['top'].set_visible(False)
         
-        tabla_fc.append({
-            "Semana": semanas[i]['label'], 
-            "Saldo Inicial": saldo_actual,
-            "+ Cartera USD": ingreso_semanal_usd_cop, 
-            "+ Ingresos Op.": ing_ord_val + ing_ex_val,
-            "+ Inyección Financiera": desembolsos_fin,
-            "- Proveedores": ap_semanas[i], 
-            "- Gastos Op.": gf_val + nom_val,
-            "- Pago Deuda (Cuotas)": cuotas_fin,
-            "FLUJO NETO": flujo_neto, 
-            "SALDO FINAL": saldo_final
-        })
-        saldo_actual = saldo_final
+        ax_saldo = ax_fc.twinx()
+        ax_saldo.plot(x_labels, saldos, color="#4A90E2", marker="o", linewidth=3, label="Saldo Final")
+        ax_saldo.set_ylabel("Saldo Final Acumulado (COP)", color="#4A90E2", fontweight='bold')
+        ax_saldo.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax_saldo.spines['top'].set_visible(False)
+        
+        lines_1, labels_1 = ax_fc.get_legend_handles_labels()
+        lines_2, labels_2 = ax_saldo.get_legend_handles_labels()
+        ax_fc.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
+        fig_fc.tight_layout()
+        st.pyplot(fig_fc, clear_figure=True)
 
-    df_fc = pd.DataFrame(tabla_fc)
-    st.dataframe(df_fc.style.format({col: "${:,.0f}" for col in df_fc.columns if col != "Semana"}).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['FLUJO NETO', 'SALDO FINAL']), use_container_width=True)
+    with tab_real:
+        # Calcular los días de la semana pasada estrictamente
+        lunes_actual = hoy_dt.normalize() - pd.Timedelta(days=hoy_dt.weekday())
+        semana_pasada_start = lunes_actual - pd.Timedelta(days=7)
+        semana_pasada_end = lunes_actual - pd.Timedelta(days=1)
+        label_sp = f"{semana_pasada_start.strftime('%d/%m')} - {semana_pasada_end.strftime('%d/%m')}"
+        
+        st.subheader(f"Ejecución de la Semana Anterior ({label_sp})")
+        st.markdown("Registra los valores reales ejecutados para descartar la proyección de la semana pasada y construir tu historial inmutable.")
+        
+        # Verificar si ya hicimos el cierre de la semana pasada
+        ya_cerrada = any(h.get("semana") == label_sp for h in data_manual.get("historico", []))
+        
+        if ya_cerrada:
+            st.success("✅ La semana pasada ya fue cerrada y guardada en el histórico.")
+        else:
+            with st.form("form_cierre_real"):
+                cr1, cr2, cr3 = st.columns(3)
+                with cr1:
+                    st.markdown("**💰 Ingresos Reales**")
+                    r_usd = st.number_input("Ingreso Cartera USD", value=0.0)
+                    r_ord = st.number_input("Ingresos Ordinarios", value=0.0)
+                    r_ex = st.number_input("Ingresos Extra", value=0.0)
+                with cr2:
+                    st.markdown("**📤 Egresos Reales**")
+                    r_prov = st.number_input("Pago a Proveedores", value=0.0)
+                    r_fijos = st.number_input("Costos Fijos (Serv., Arr., Otros)", value=0.0)
+                with cr3:
+                    st.markdown("**🧑‍💼 Nómina y Deuda**")
+                    r_nom = st.number_input("Pago Nómina y Seg. Social", value=0.0)
+                    r_fin = st.number_input("Pago Cuotas Deuda", value=0.0)
+                    
+                if st.form_submit_button("🔒 Confirmar Cierre Real", disabled=not puede_editar):
+                    nuevo_cierre = {
+                        "semana": label_sp,
+                        "ingresos_reales": r_usd + r_ord + r_ex,
+                        "egresos_reales": r_prov + r_fijos + r_nom + r_fin,
+                        "flujo_neto_real": (r_usd + r_ord + r_ex) - (r_prov + r_fijos + r_nom + r_fin)
+                    }
+                    data_manual["historico"].append(nuevo_cierre)
+                    guardar_datos_manuales(data_manual)
+                    st.rerun()
 
-    st.markdown("### 📈 Evolución de Liquidez")
-    fig_fc, ax_fc = plt.subplots(figsize=(12, 5))
-    x_labels = [row["Semana"] for row in tabla_fc]
-    netos = [row["FLUJO NETO"] for row in tabla_fc]
-    saldos = [row["SALDO FINAL"] for row in tabla_fc]
-    
-    colores_barras = ["#50E3C2" if val >= 0 else "#E15554" for val in netos]
-    ax_fc.bar(x_labels, netos, color=colores_barras, alpha=0.8, label="Flujo Neto")
-    ax_fc.axhline(0, color='black', linewidth=1.2)
-    ax_fc.set_ylabel("Flujo Neto (COP)", fontweight='bold')
-    ax_fc.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
-    ax_fc.spines['top'].set_visible(False)
-    
-    ax_saldo = ax_fc.twinx()
-    ax_saldo.plot(x_labels, saldos, color="#4A90E2", marker="o", linewidth=3, label="Saldo Final")
-    ax_saldo.set_ylabel("Saldo Final Acumulado (COP)", color="#4A90E2", fontweight='bold')
-    ax_saldo.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
-    ax_saldo.spines['top'].set_visible(False)
-    
-    lines_1, labels_1 = ax_fc.get_legend_handles_labels()
-    lines_2, labels_2 = ax_saldo.get_legend_handles_labels()
-    ax_fc.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
-    fig_fc.tight_layout()
-    st.pyplot(fig_fc, clear_figure=True)
-
+        st.markdown("---")
+        st.subheader("📚 Histórico de Ejecución Real")
+        if data_manual.get("historico"):
+            df_hist = pd.DataFrame(data_manual["historico"])
+            df_hist.columns = ["Semana", "Ingresos Reales", "Egresos Reales", "Flujo Neto Real"]
+            st.dataframe(
+                df_hist.style.format({c: "${:,.0f}" for c in df_hist.columns if c != "Semana"})
+                .map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['Flujo Neto Real']), 
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Aún no hay semanas cerradas en el histórico.")
 
 # =========================
 # MÓDULO 4: UI ENDEUDAMIENTO Y CAPEX
@@ -1200,6 +1263,74 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     if FPDF:
         pdf_data = generar_pdf_integral(kpis, data_fx, data_cxp, pd.DataFrame(), f_liq, f_marg, None, {"CCC": dso+dio-dpo}, {"Saldo Inicial": float(cargar_datos_manuales().get("saldo_inicial", 0))}, fig_caus)
         st.download_button("📄 Descargar Reporte de Junta Directiva (PDF)", data=pdf_data, file_name="Reporte_Gerencial_PRO.pdf", mime="application/pdf")
+
+# =========================
+# MÓDULO 8: LECTURA DEL HISTÓRICO REAL
+# =========================
+def app_lectura_historico():
+    st.title("📚 Análisis Histórico de Ejecución Real")
+    st.markdown("Este módulo visualiza todas las semanas que has cerrado formalmente en la pestaña de 'Cierre Real'.")
+
+    data = cargar_datos_manuales()
+    historico = data.get("historico", [])
+    
+    if not historico:
+        st.info("⚠️ Aún no hay datos en el histórico. Debes cerrar al menos una semana en el módulo de 'Flujo de Caja' para ver gráficas aquí.")
+        return
+
+    # Convertir a DataFrame para procesar
+    df_hist = pd.DataFrame(historico)
+    # Renombrar para que la tabla sea estética
+    df_hist.columns = ["Semana", "Ingresos Reales", "Egresos Reales", "Flujo Neto Real"]
+
+    # --- MÉTRICAS TOTALES ACUMULADAS ---
+    t_ing = df_hist["Ingresos Reales"].sum()
+    t_egr = df_hist["Egresos Reales"].sum()
+    t_net = df_hist["Flujo Neto Real"].sum()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Ingresos (Hist.)", formato_pesos(t_ing))
+    c2.metric("Total Egresos (Hist.)", formato_pesos(t_egr))
+    c3.metric("Saldo Neto Acumulado", formato_pesos(t_net), delta=formato_pesos(t_net))
+
+    st.markdown("---")
+
+    # --- GRÁFICA HISTÓRICA ---
+    st.subheader("📊 Evolución de Flujos Reales")
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    # Barras de Ingresos y Egresos (Egresos en negativo para visualización tipo espejo)
+    ax.bar(df_hist["Semana"], df_hist["Ingresos Reales"], label="Ingresos Reales", color="#50E3C2", alpha=0.6)
+    ax.bar(df_hist["Semana"], -df_hist["Egresos Reales"], label="Egresos Reales", color="#E15554", alpha=0.6)
+    
+    # Línea de tendencia del Flujo Neto
+    ax.plot(df_hist["Semana"], df_hist["Flujo Neto Real"], label="Flujo Neto Real", color="#4A90E2", marker="o", linewidth=3)
+    
+    ax.axhline(0, color='black', linewidth=1)
+    ax.set_ylabel("Pesos Colombianos (COP)")
+    ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+    ax.legend(loc='upper left')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.xticks(rotation=45)
+    fig.tight_layout()
+    st.pyplot(fig)
+
+    st.markdown("---")
+
+    # --- TABLA DE DATOS ---
+    st.subheader("📋 Detalle de Semanas Cerradas")
+    st.dataframe(
+        df_hist.style.format({
+            "Ingresos Reales": "${:,.0f}",
+            "Egresos Reales": "${:,.0f}",
+            "Flujo Neto Real": "${:,.0f}"
+        }).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['Flujo Neto Real']),
+        use_container_width=True,
+        hide_index=True
+    )
+
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
@@ -1232,6 +1363,7 @@ def main():
         "5. Flujo de Caja a 4 Semanas", 
         "6. Endeudamiento y CAPEX", 
         "7. Simulador Estratégico CCC"
+        "8. Lectura del Histórico"
     ))
     
     st.sidebar.markdown("---")
@@ -1249,6 +1381,7 @@ def main():
     elif app_sel == "5. Flujo de Caja a 4 Semanas": app_flujo_caja(f_usd, m_usd, f_compras, f_pagos)
     elif app_sel == "6. Endeudamiento y CAPEX": app_endeudamiento_capex()
     elif app_sel == "7. Simulador Estratégico CCC": app_simulador_ccc()
+    elif app_sel == "8. Lectura del Histórico": app_lectura_historico()
 
 if __name__ == "__main__":
     main()
