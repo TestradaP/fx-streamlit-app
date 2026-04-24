@@ -1362,7 +1362,7 @@ def main():
         "4. Revisar facturas de compras", 
         "5. Flujo de Caja a 4 Semanas", 
         "6. Endeudamiento y CAPEX", 
-        "7. Simulador Estratégico CCC"
+        "7. Simulador Estratégico CCC",
         "8. Lectura del Histórico"
     ))
     
