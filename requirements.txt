@@ -4,3 +4,5 @@ requests
 matplotlib
 openpyxl
 fpdf
+openai
+langchain

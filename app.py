@@ -18,6 +18,16 @@ try:
 except ImportError:
     FPDF = None
 
+# Imports para AI Agent
+try:
+    import openai
+    from langchain_experimental.agents import create_pandas_dataframe_agent
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    openai = None
+    create_pandas_dataframe_agent = None
+    ChatOpenAI = None
+
 # =========================
 # CONFIGURACIÓN DE PÁGINA
 # =========================
@@ -1247,22 +1257,54 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     ax.step(df_chart["factura"], df_chart["dif_no_realizada"], label="Impacto Acumulado", color="#c0392b", where='mid')
     ax.set_title("Analisis de Causacion NIIF (Top 10 Facturas)"); ax.yaxis.set_major_formatter(FuncFormatter(formato_pesos)); ax.legend()
 
-    st.subheader("📊 Analisis de Causacion (Mes vs Acumulado)")
-    st.pyplot(fig_caus)
-
-    # REPARACIÓN: TABLA CON NÚMEROS VISIBLES
-    df_v = df_f[["factura", "cliente", "saldo_vivo_actual_usd", "dif_no_realizada_mes", "dif_no_realizada"]].copy()
-    df_v.columns = ["Factura", "Cliente", "Saldo (USD)", "Efecto Mes (COP)", "Efecto Total (COP)"]
-    st.dataframe(df_v.style.format({"Saldo (USD)": "${:,.2f}", "Efecto Mes (COP)": "${:,.0f}", "Efecto Total (COP)": "${:,.0f}"}), use_container_width=True, hide_index=True, column_config={"Efecto Mes (COP)": st.column_config.NumberColumn(width="large"), "Efecto Total (COP)": st.column_config.NumberColumn(width="large")})
-
     # Gráficas de apoyo
     f_liq, ax1 = plt.subplots(); ax1.bar(["Activo", "Pasivo"], [vals.get("Activo Corriente",0), vals.get("Pasivo Corriente",0)], color=["#2ecc71", "#e74c3c"]); ax1.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
     f_marg, ax2 = plt.subplots(); ax2.bar(["Margen Neto", "ROE"], [kpis["Margen Neto"], kpis["ROE"]], color="#3498db"); ax2.yaxis.set_major_formatter(FuncFormatter(formato_porcentaje))
 
-    st.markdown("---")
-    if FPDF:
-        pdf_data = generar_pdf_integral(kpis, data_fx, data_cxp, pd.DataFrame(), f_liq, f_marg, None, {"CCC": dso+dio-dpo}, {"Saldo Inicial": float(cargar_datos_manuales().get("saldo_inicial", 0))}, fig_caus)
-        st.download_button("📄 Descargar Reporte de Junta Directiva (PDF)", data=pdf_data, file_name="Reporte_Gerencial_PRO.pdf", mime="application/pdf")
+    # Preparar agentes AI si disponible
+    agentes = {}
+    if openai and create_pandas_dataframe_agent and ChatOpenAI:
+        openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password", key="openai_key")
+        if openai_api_key:
+            os.environ["OPENAI_API_KEY"] = openai_api_key
+            llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo")
+            agentes["CxC"] = create_pandas_dataframe_agent(llm, df_f, verbose=True)
+            agentes["CxP"] = create_pandas_dataframe_agent(llm, df_c, verbose=True)
+            agentes["Estados Financieros"] = create_pandas_dataframe_agent(llm, pd.DataFrame([vals]), verbose=True)
+
+    tab_resumen, tab_ai = st.tabs(["📊 Resumen Ejecutivo", "🤖 AI Assistant"])
+
+    with tab_resumen:
+        st.subheader("📊 Analisis de Causacion (Mes vs Acumulado)")
+        st.pyplot(fig_caus)
+
+        # REPARACIÓN: TABLA CON NÚMEROS VISIBLES
+        df_v = df_f[["factura", "cliente", "saldo_vivo_actual_usd", "dif_no_realizada_mes", "dif_no_realizada"]].copy()
+        df_v.columns = ["Factura", "Cliente", "Saldo (USD)", "Efecto Mes (COP)", "Efecto Total (COP)"]
+        st.dataframe(df_v.style.format({"Saldo (USD)": "${:,.2f}", "Efecto Mes (COP)": "${:,.0f}", "Efecto Total (COP)": "${:,.0f}"}), use_container_width=True, hide_index=True, column_config={"Efecto Mes (COP)": st.column_config.NumberColumn(width="large"), "Efecto Total (COP)": st.column_config.NumberColumn(width="large")})
+
+        st.markdown("---")
+        if FPDF:
+            pdf_data = generar_pdf_integral(kpis, data_fx, data_cxp, pd.DataFrame(), f_liq, f_marg, None, {"CCC": dso+dio-dpo}, {"Saldo Inicial": float(cargar_datos_manuales().get("saldo_inicial", 0))}, fig_caus)
+            st.download_button("📄 Descargar Reporte de Junta Directiva (PDF)", data=pdf_data, file_name="Reporte_Gerencial_PRO.pdf", mime="application/pdf")
+
+    with tab_ai:
+        if not agentes:
+            st.warning("🤖 AI Assistant requiere instalar 'openai' y 'langchain', y proporcionar una API Key de OpenAI en la barra lateral.")
+        else:
+            dataset = st.selectbox("Selecciona el conjunto de datos:", list(agentes.keys()))
+            pregunta = st.text_input("Haz una pregunta sobre los datos (ej: 'Calcula el promedio de saldos vivos' o 'Qué facturas tienen más de 1000 USD?')")
+            if st.button("Preguntar al AI"):
+                if pregunta.strip():
+                    with st.spinner("Procesando pregunta..."):
+                        try:
+                            respuesta = agentes[dataset].run(pregunta)
+                            st.success("Respuesta del AI:")
+                            st.write(respuesta)
+                        except Exception as e:
+                            st.error(f"Error al procesar la pregunta: {e}")
+                else:
+                    st.warning("Por favor, ingresa una pregunta.")
 
 # =========================
 # MÓDULO 8: LECTURA DEL HISTÓRICO REAL
