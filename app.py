@@ -1759,99 +1759,91 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
                 * **Gestión de Cobranzas Priorizada:** No gastamos energía llamando a todos los clientes. El equipo de cartera debe enfocar el 100% de sus esfuerzos en las facturas marcadas con etiqueta **🔴 Riesgo Alto** antes de que se venzan.
                 * **Política de Crédito:** Si el modelo (ver gráfica) demuestra empíricamente que las facturas de alto valor tienen mayor riesgo sistémico de impago, la Junta puede exigir que los contratos grandes lleven un anticipo obligatorio mayor o pólizas de seguro de crédito.
                 """)
-    # ========================================================
-    # MODELO 4: COBERTURAS CAMBIARIAS (VERSIÓN ROBUSTA CON ARIMA Y SLIDER)
-    # ========================================================
+    # -------------------------------------------------------------------------
+    # MODELO 4: FORWARD + CURVA NDF + SPREAD + PAYOFF MATRIX (VERSIÓN ULTRA ROBUSTA)
+    # -------------------------------------------------------------------------
     elif modelo_sel.startswith("4"):
-        st.subheader("🛡️ Simulador de Coberturas Cambiarias (Derivados - Forwards)")
-        st.markdown("Calcula el precio teórico de un contrato Forward (Paridad de Tasas) y compáralo contra proyecciones econométricas de la TRM.")
+        st.subheader("🛡️ Simulador Avanzado de Derivados (Forwards y Curva NDF)")
+        st.markdown("Cotiza tu cobertura cambiaria con precisión de mesa de dinero: incluye spread bancario, curva de expectativas y perfil de pagos (Payoff).")
 
-        if not (facturas_file and monetizaciones_file):
-            st.warning("⚠️ Sube los archivos de CxC (USD) y Monetizaciones en la barra lateral para evaluar la cobertura sobre tu saldo vivo.")
-            return
+        st.markdown("#### ⚙️ 1. Parámetros de Mercado e Insumos")
+        c1, c2, c3, c4 = st.columns(4)
+        plazo = c1.slider("Plazo Cobertura (Días)", 15, 360, 90, 15)
+        t_cop = c2.number_input("Tasa COP (%)", value=11.25, step=0.25)
+        t_usd = c3.number_input("Tasa USD (%)", value=5.25, step=0.25)
+        spread = c4.number_input("Spread Banco ($)", value=30.0, help="Margen de ganancia del banco")
 
-        # 1. Carga de Datos y Parámetros
-        df_facturas = cargar_facturas(facturas_file)
-        df_mon = cargar_monetizaciones(monetizaciones_file)
-        saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
+        t_cop_d, t_usd_d = t_cop / 100, t_usd / 100
 
-        hoy = pd.Timestamp.today().normalize()
-        df_trm_hist = descargar_trm_historica(hoy - pd.Timedelta(days=365), hoy)
-        trm_spot = float(df_trm_hist["trm"].iloc[-1])
+        # --- CÁLCULO TASA ESPECÍFICA CON SPREAD ---
+        f_teorico = trm_spot * ((1 + t_cop_d * (plazo / 360)) / (1 + t_usd_d * (plazo / 360)))
+        f_cliente = f_teorico - spread # Ajuste para exportador (vende USD al banco)
 
-        st.markdown("#### ⚙️ 1. Parámetros de Cobertura y Horizonte")
-        # RESTAURADO: Horizonte como Slider destacado
-        dias_forward = st.slider("Plazo de Cobertura u Horizonte del Forward (Días)", min_value=5, max_value=180, value=90, step=5)
+        # Mostrar la fórmula matemática
+        with st.expander("🔬 Ver Fundamento Matemático (Paridad de Tasas de Interés)"):
+            st.latex(r"Forward = Spot \times \frac{1 + r_{COP} \times (t/360)}{1 + r_{USD} \times (t/360)} - Spread")
+            st.markdown(f"**Cálculo en vivo:** ${trm_spot:,.2f} * [(1 + {t_cop_d} * ({plazo}/360)) / (1 + {t_usd_d} * ({plazo}/360))] - ${spread} = **${f_cliente:,.2f}**")
+
+        # --- CÁLCULO DE CURVA NDF ---
+        st.markdown("#### 📈 2. Estructura Temporal de la TRM (Curva NDF)")
+        nodos = np.array([15, 30, 60, 90, 120, 180, 270, 360])
+        curva = trm_spot * ((1 + t_cop_d * (nodos / 360)) / (1 + t_usd_d * (nodos / 360)))
         
-        c1, c2 = st.columns(2)
-        tasa_cop = c1.number_input("Tasa Libre Riesgo COP (%)", value=11.5, step=0.5)
-        tasa_usd = c2.number_input("Tasa Libre Riesgo USD (%)", value=5.25, step=0.25)
+        fig4, ax4 = plt.subplots(figsize=(12, 4))
+        ax4.plot(nodos, curva, marker='o', color='#8e44ad', label='Curva NDF (Mid-Market)')
+        ax4.scatter(plazo, f_cliente, color='red', s=200, zorder=5, label=f'Tu Tasa Neta Cliente (${f_cliente:,.2f})')
+        ax4.axhline(trm_spot, color='gray', linestyle='--', label=f'Spot Hoy (${trm_spot:,.2f})')
+        ax4.set_title("Curva de Arbitraje y Ubicación de tu Contrato")
+        ax4.set_xlabel("Días hacia el futuro")
+        ax4.set_ylabel("Tasa Forward (COP/USD)")
+        ax4.legend()
+        ax4.spines['top'].set_visible(False)
+        ax4.spines['right'].set_visible(False)
+        st.pyplot(fig4)
 
-        st.markdown("#### 🤖 2. Proyección de la TRM a Vencimiento (Escenario Desnudo)")
-        tipo_proyeccion = st.radio(
-            "Selecciona el método de estimación para comparar contra el Forward:",
-            ("📉 Modelo Econométrico (ARIMA)", "✍️ Ingreso Manual (Escenario de Estrés Directivo)")
-        )
-
-        if tipo_proyeccion == "✍️ Ingreso Manual (Escenario de Estrés Directivo)":
-            trm_esperada = st.number_input("Digita la TRM Proyectada a Vencimiento", value=float(trm_spot * 0.95), step=50.0)
-            st.info(f"👆 Estás evaluando el impacto si el dólar llegara a **${trm_esperada:,.2f}** en {dias_forward} días.")
-        else:
-            with st.spinner(f"Entrenando modelo ARIMA(1,1,1) para proyectar {dias_forward} días..."):
-                serie_trm = df_trm_hist['trm'].values
-                modelo_arima = ARIMA(serie_trm, order=(1, 1, 1))
-                resultado_arima = modelo_arima.fit()
-                
-                # Ejecutar Proyección
-                forecast = resultado_arima.forecast(steps=int(dias_forward))
-                trm_esperada = float(forecast[-1])
-                
-                st.success(f"🧠 El modelo ARIMA proyecta una TRM de **${trm_esperada:,.2f}** al final del horizonte.")
-                
-                # --- NUEVA GRÁFICA ROBUSTA DE PROYECCIÓN ---
-                fig_f, ax_f = plt.subplots(figsize=(10, 3.5))
-                ver_atras = 60 # Ver últimos 2 meses de historia
-                ax_f.plot(range(-ver_atras, 0), serie_trm[-ver_atras:], label="Historia Real", color="#34495e", linewidth=2)
-                ax_f.plot(range(0, int(dias_forward)), forecast, label="Proyección ARIMA", color="#3498db", linestyle="--", linewidth=2)
-                ax_f.axvline(0, color="gray", linestyle=":", alpha=0.5)
-                ax_f.set_title(f"Tendencia Econométrica Proyectada a {dias_forward} días")
-                ax_f.legend(loc='upper left')
-                ax_f.spines['top'].set_visible(False)
-                ax_f.spines['right'].set_visible(False)
-                st.pyplot(fig_f)
-
-        # 2. Cálculo Teórico del Forward
-        tasa_cop_dec, tasa_usd_dec = tasa_cop / 100, tasa_usd / 100
-        forward_rate = trm_spot * ((1 + tasa_cop_dec * (dias_forward / 360)) / (1 + tasa_usd_dec * (dias_forward / 360)))
-
-        # 3. Resultados y Toma de Decisión
-        st.markdown("#### 🎯 3. Resultados Financieros y Decisión")
-        res1, res2, res3 = st.columns(3)
-        res1.metric("TRM Spot (Hoy)", f"${trm_spot:,.2f}")
-        res2.metric("TRM Forward", f"${forward_rate:,.2f}")
+        # --- PERFIL DE PAGOS (PAYOFF PROFILE) ---
+        st.markdown("#### ⚖️ 3. Perfil de Pagos (Matriz de Pérdidas y Ganancias del Derivado)")
+        st.markdown("Como exportador, el Forward te protege si el dólar cae, pero te genera un costo de oportunidad si el dólar sube. Mira el comportamiento exacto:")
         
-        ahorro = (saldo_vivo_usd * forward_rate) - (saldo_vivo_usd * trm_esperada)
-        res3.metric("Ahorro/Costo vs Escenario", f"${ahorro:,.0f} COP", delta=f"{ahorro:,.0f}", delta_color="normal")
+        escenarios_trm = np.linspace(trm_spot * 0.85, trm_spot * 1.15, 100)
+        # Payoff para un exportador (Vende dólares a tasa fija)
+        # Si la TRM real cae, el exportador gana porque vende más caro al banco.
+        payoff = (f_cliente - escenarios_trm) * saldo_vivo_usd
 
-        # Visualización de barras comparativas
-        fig_b, ax_b = plt.subplots(figsize=(10, 3))
-        escenarios = ['TRM Hoy', 'Asegurado (Forward)', 'Proyectado (ARIMA/Manual)']
-        valores = [saldo_vivo_usd * trm_spot, saldo_vivo_usd * forward_rate, saldo_vivo_usd * trm_esperada]
-        ax_b.bar(escenarios, valores, color=['#95a5a6', '#2ecc71', '#3498db'], width=0.4)
-        ax_b.set_title("Valor Final de la Cartera según Escenario")
-        ax_b.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
-        st.pyplot(fig_b)
+        fig_payoff, ax_payoff = plt.subplots(figsize=(12, 4))
+        ax_payoff.plot(escenarios_trm, payoff, color='#2c3e50', linewidth=2)
+        ax_payoff.axhline(0, color='black', linewidth=1)
+        ax_payoff.axvline(f_cliente, color='red', linestyle='--', label=f'Punto de Equilibrio (${f_cliente:,.0f})')
+        ax_payoff.fill_between(escenarios_trm, 0, payoff, where=(payoff > 0), facecolor='#2ecc71', alpha=0.3, label='Zona de Protección (Ahorro)')
+        ax_payoff.fill_between(escenarios_trm, 0, payoff, where=(payoff < 0), facecolor='#e74c3c', alpha=0.3, label='Costo de Oportunidad')
+        
+        ax_payoff.set_title(f"Perfil de Payoff del Contrato Forward (Nocional: ${saldo_vivo_usd:,.0f} USD)")
+        ax_payoff.set_xlabel("Posibles Valores de la TRM Real al Vencimiento")
+        ax_payoff.set_ylabel("Impacto en Caja (COP)")
+        ax_payoff.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax_payoff.xaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax_payoff.legend()
+        st.pyplot(fig_payoff)
 
-        # 4. Guía para la Junta
+        # --- SIMULADOR DE ESTRÉS DIRECTIVO ---
+        st.markdown("#### 🎯 4. Análisis de Escenario Puntual")
+        trm_junta = st.number_input("Si la Junta cree que el dólar cerrará a...", value=float(trm_spot*0.95), step=50.0)
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Tu Tasa Forward (Garantizada)", f"${f_cliente:,.2f}")
+        m2.metric("TRM Real Hipotética", f"${trm_junta:,.2f}")
+        
+        ahorro = (saldo_vivo_usd * f_cliente) - (saldo_vivo_usd * trm_junta)
+        estado = "✅ AHORRO CREADO" if ahorro > 0 else "❌ COSTO DE OPORTUNIDAD"
+        m3.metric(f"Resultado: {estado}", f"${ahorro:,.0f} COP", delta=f"{ahorro:,.0f}")
+
         st.markdown("---")
-        with st.expander(f"💡 **Interpretación Gerencial para el Horizonte de {dias_forward} días**"):
+        with st.expander("💡 **Guía de Interpretación Gerencial**"):
             st.write(f"""
-            ### ¿Por qué elegir este horizonte?
-            1. **Sincronización**: Hemos ajustado el análisis a **{dias_forward} días** porque es el tiempo promedio en que esperamos recibir el dinero de nuestros clientes.
-            2. **Forward vs. Proyección**: Mientras que el mercado (ARIMA) sugiere una tendencia hacia **${trm_esperada:,.2f}**, el banco nos ofrece cerrar hoy en **${forward_rate:,.2f}**. 
-            3. **La Decisión**: Si el ahorro es positivo, el seguro bancario es más rentable que la tendencia del mercado. Si es negativo, el seguro tiene un "costo de tranquilidad", pero garantiza que no habrá sorpresas en el flujo de caja de la semana {int(dias_forward/7)}.
+            1. **La Curva NDF (Gráfico 1)**: Nos dice cuánto cuesta el dinero en el tiempo. El banco nos cotiza una tasa neta de **${f_cliente:,.2f}**.
+            2. **El Payoff (Gráfico 2)**: Es la herramienta definitiva de decisión. La zona verde es el "seguro actuando": si el dólar se desploma, el derivado nos salva de perder esos millones. La zona roja es el "costo del seguro": si el dólar se dispara, dejaremos de ganar dinero extra porque estamos amarrados al contrato.
+            3. **La Filosofía**: No compramos el Forward para especular en la zona verde, lo compramos para asegurarnos de que la caja de la empresa jamás se destruya en caso de una caída fuerte del dólar.
             """)
-
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
