@@ -6,3 +6,4 @@ openpyxl
 fpdf
 google-generativeai
 numpy
+scikit-learn
