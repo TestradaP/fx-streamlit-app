@@ -1760,11 +1760,25 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
                 * **Política de Crédito:** Si el modelo (ver gráfica) demuestra empíricamente que las facturas de alto valor tienen mayor riesgo sistémico de impago, la Junta puede exigir que los contratos grandes lleven un anticipo obligatorio mayor o pólizas de seguro de crédito.
                 """)
     # -------------------------------------------------------------------------
-    # MODELO 4: FORWARD + CURVA NDF + SPREAD + PAYOFF MATRIX (VERSIÓN ULTRA ROBUSTA)
+    # MODELO 4: FORWARD + CURVA NDF + SPREAD + PAYOFF MATRIX (CORREGIDO)
     # -------------------------------------------------------------------------
     elif modelo_sel.startswith("4"):
         st.subheader("🛡️ Simulador Avanzado de Derivados (Forwards y Curva NDF)")
         st.markdown("Cotiza tu cobertura cambiaria con precisión de mesa de dinero: incluye spread bancario, curva de expectativas y perfil de pagos (Payoff).")
+
+        # --- AHORA SÍ: CARGAMOS LOS DATOS Y LA TRM AQUÍ ADENTRO ---
+        if not facturas_file:
+            st.warning("⚠️ Sube el archivo de CxC (USD) en la barra lateral para evaluar la cobertura sobre tu saldo vivo.")
+            return
+
+        with st.spinner("Conectando con el mercado y calculando métricas..."):
+            df_facturas = cargar_facturas(facturas_file)
+            df_mon = cargar_monetizaciones(monetizaciones_file) if monetizaciones_file else pd.DataFrame(columns=['monto_usd'])
+            saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
+
+            hoy = pd.Timestamp.today().normalize()
+            df_trm_hist = descargar_trm_historica(hoy - pd.Timedelta(days=10), hoy)
+            trm_spot = float(df_trm_hist["trm"].iloc[-1])
 
         st.markdown("#### ⚙️ 1. Parámetros de Mercado e Insumos")
         c1, c2, c3, c4 = st.columns(4)
@@ -1806,8 +1820,6 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
         st.markdown("Como exportador, el Forward te protege si el dólar cae, pero te genera un costo de oportunidad si el dólar sube. Mira el comportamiento exacto:")
         
         escenarios_trm = np.linspace(trm_spot * 0.85, trm_spot * 1.15, 100)
-        # Payoff para un exportador (Vende dólares a tasa fija)
-        # Si la TRM real cae, el exportador gana porque vende más caro al banco.
         payoff = (f_cliente - escenarios_trm) * saldo_vivo_usd
 
         fig_payoff, ax_payoff = plt.subplots(figsize=(12, 4))
