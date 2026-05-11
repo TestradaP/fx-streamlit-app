@@ -6,6 +6,7 @@ import re
 import tempfile
 from io import BytesIO
 from typing import Optional
+import numpy as np
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -1497,6 +1498,111 @@ def app_lectura_historico():
     )
 
 # =========================
+# MÓDULO 9: LABORATORIO QUANT (MODELOS ESTOCÁSTICOS Y EMPÍRICOS)
+# =========================
+def app_laboratorio_quant(facturas_file, monetizaciones_file):
+    st.title("🧪 Laboratorio Quant: Modelos Estocásticos y Empíricos")
+    st.markdown("Este módulo integra herramientas de econometría y finanzas cuantitativas para la simulación de escenarios de riesgo y optimización de liquidez.")
+
+    # Selector interno para los diferentes modelos del laboratorio
+    modelo_sel = st.selectbox("⚙️ Selecciona el modelo a ejecutar:", [
+        "1. Simulación Monte Carlo - VaR Cambiario (Movimiento Browniano)",
+        "2. Modelo Estocástico de Liquidez de Miller-Orr (Próximamente)",
+        "3. Scoring de Cartera Logit (Próximamente)",
+        "4. Coberturas Cambiarias - Forwards (Próximamente)"
+    ])
+
+    st.markdown("---")
+
+    if modelo_sel.startswith("1"):
+        st.subheader("🎲 Simulación Monte Carlo: Valor en Riesgo (VaR) Cambiario")
+        st.markdown("""
+        Utiliza un **Movimiento Browniano Geométrico** para simular miles de trayectorias posibles para la TRM en los próximos días, basándose en la volatilidad histórica real.
+        """)
+
+        if not (facturas_file and monetizaciones_file):
+            st.warning("⚠️ Sube los archivos de CxC (USD) y Monetizaciones en la barra lateral para leer tu saldo vivo y calcular el riesgo.")
+            return
+
+        with st.spinner("Procesando datos históricos y ejecutando motor Monte Carlo..."):
+            # 1. Obtener el saldo vivo actual de la empresa
+            df_facturas = cargar_facturas(facturas_file)
+            df_mon = cargar_monetizaciones(monetizaciones_file)
+            saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
+
+            # 2. Descargar 1 año de historia de la TRM para calcular Volatilidad
+            hoy = pd.Timestamp.today().normalize()
+            hace_un_ano = hoy - pd.Timedelta(days=365)
+            df_trm = descargar_trm_historica(hace_un_ano, hoy)
+            trm_actual = float(df_trm["trm"].iloc[-1])
+
+            # 3. Cálculos Econométricos (Retornos logarítmicos)
+            df_trm['Retorno_Log'] = np.log(df_trm['trm'] / df_trm['trm'].shift(1))
+            mu = df_trm['Retorno_Log'].mean()
+            sigma = df_trm['Retorno_Log'].std()
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Saldo Expuesto (USD)", f"${saldo_vivo_usd:,.0f}")
+            c2.metric("TRM Hoy", f"${trm_actual:,.2f}")
+            c3.metric("Rend. Diario Esperado (μ)", f"{mu:.4%}")
+            c4.metric("Volatilidad Diaria (σ)", f"{sigma:.4%}")
+
+            # 4. Parámetros de Simulación (Interactivos)
+            st.markdown("#### ⚙️ Parámetros de Simulación")
+            col_p1, col_p2, col_p3 = st.columns(3)
+            horizonte_dias = col_p1.slider("Horizonte de Riesgo (Días)", min_value=5, max_value=60, value=30, step=5)
+            num_simulaciones = col_p2.selectbox("Número de Simulaciones", [1000, 5000, 10000], index=1)
+            nivel_confianza = col_p3.selectbox("Nivel de Confianza (VaR)", [0.90, 0.95, 0.99], index=1)
+
+            # 5. MOTOR MONTE CARLO (Ecuación Diferencial Estocástica)
+            Z = np.random.standard_normal((horizonte_dias, num_simulaciones))
+            # Matriz para guardar los caminos
+            caminos_trm = np.zeros_like(Z)
+            caminos_trm[0] = trm_actual
+
+            # Loop para generar los saltos diarios (Movimiento Browniano Geométrico)
+            for t in range(1, horizonte_dias):
+                caminos_trm[t] = caminos_trm[t-1] * np.exp((mu - (sigma**2) / 2) + sigma * Z[t])
+
+            # 6. Cálculo del Value at Risk (VaR)
+            trm_finales = caminos_trm[-1] # Tomamos la última fila (el día final simulado)
+            # El VaR mira el peor escenario (la cola izquierda de la distribución de la TRM)
+            trm_peor_escenario = np.percentile(trm_finales, (1 - nivel_confianza) * 100)
+            
+            valor_cartera_hoy = saldo_vivo_usd * trm_actual
+            valor_cartera_peor_escenario = saldo_vivo_usd * trm_peor_escenario
+            var_pesos = valor_cartera_hoy - valor_cartera_peor_escenario
+
+            st.error(f"🚨 **Valor en Riesgo (VaR) a {horizonte_dias} días al {nivel_confianza*100}% de confianza:** El modelo estocástico indica que en el peor de los casos (excluyendo el {round((1-nivel_confianza)*100, 1)}% de eventos extremos o cisnes negros), la empresa no perderá más de **${var_pesos:,.0f} COP** por devaluación del dólar.")
+            st.info(f"📉 En ese escenario pesimista crítico, la TRM caería a **${trm_peor_escenario:,.2f}**.")
+
+            # 7. Visualización Científica
+            st.markdown("#### 📊 Distribución de Trayectorias y Frecuencias")
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5), gridspec_kw={'width_ratios': [2, 1]})
+            
+            # Gráfica 1: Las 100 primeras trayectorias (para no saturar visualmente)
+            ax1.plot(caminos_trm[:, :100], alpha=0.3, color='#3498db', linewidth=1)
+            ax1.axhline(trm_actual, color='black', linestyle='--', label=f'TRM Hoy ({trm_actual:,.2f})')
+            ax1.axhline(trm_peor_escenario, color='red', linestyle='-', linewidth=2, label=f'Límite Riesgo VaR ({trm_peor_escenario:,.2f})')
+            ax1.set_title(f"Muestra de Trayectorias Simuladas (Movimiento Browniano)")
+            ax1.set_xlabel("Días hacia el futuro")
+            ax1.set_ylabel("TRM Simulada")
+            ax1.legend()
+            ax1.spines['top'].set_visible(False)
+            ax1.spines['right'].set_visible(False)
+
+            # Gráfica 2: Histograma de las 10,000 TRMs finales
+            ax2.hist(trm_finales, bins=50, color='#2ecc71', alpha=0.7, edgecolor='black', density=True)
+            ax2.axvline(trm_actual, color='black', linestyle='--', linewidth=2)
+            ax2.axvline(trm_peor_escenario, color='red', linestyle='-', linewidth=2)
+            ax2.set_title("Distribución de Probabilidad a Término")
+            ax2.set_xlabel("TRM Final")
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+
+            st.pyplot(fig)
+
+# =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
 def main():
@@ -1529,6 +1635,7 @@ def main():
         "6. Endeudamiento y CAPEX", 
         "7. Simulador Estratégico CCC",
         "8. Lectura del Histórico"
+        "9. Laboratorio Quant (Avanzado)"
     ))
     
     st.sidebar.markdown("---")
@@ -1547,6 +1654,7 @@ def main():
     elif app_sel == "6. Endeudamiento y CAPEX": app_endeudamiento_capex()
     elif app_sel == "7. Simulador Estratégico CCC": app_simulador_ccc()
     elif app_sel == "8. Lectura del Histórico": app_lectura_historico()
+    elif app_sel == "9. Laboratorio Quant (Avanzado)": app_laboratorio_quant(f_usd, m_usd)
 
 if __name__ == "__main__":
     main()
