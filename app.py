@@ -1634,7 +1634,7 @@ def main():
         "5. Flujo de Caja a 4 Semanas", 
         "6. Endeudamiento y CAPEX", 
         "7. Simulador Estratégico CCC",
-        "8. Lectura del Histórico"
+        "8. Lectura del Histórico",
         "9. Laboratorio Quant (Avanzado)"
     ))
     
