@@ -1497,14 +1497,13 @@ def app_lectura_historico():
         hide_index=True
     )
 
-# =========================
-# MÓDULO 9: LABORATORIO QUANT (MODELOS ESTOCÁSTICOS Y EMPÍRICOS)
+# # =========================
+# MÓDULO 9: LABORATORIO QUANT (CON EXPLICACIÓN GERENCIAL)
 # =========================
 def app_laboratorio_quant(facturas_file, monetizaciones_file):
     st.title("🧪 Laboratorio Quant: Modelos Estocásticos y Empíricos")
-    st.markdown("Este módulo integra herramientas de econometría y finanzas cuantitativas para la simulación de escenarios de riesgo y optimización de liquidez.")
+    st.markdown("Este módulo integra herramientas de econometría y finanzas cuantitativas para la simulación de escenarios de riesgo.")
 
-    # Selector interno para los diferentes modelos del laboratorio
     modelo_sel = st.selectbox("⚙️ Selecciona el modelo a ejecutar:", [
         "1. Simulación Monte Carlo - VaR Cambiario (Movimiento Browniano)",
         "2. Modelo Estocástico de Liquidez de Miller-Orr (Próximamente)",
@@ -1516,91 +1515,72 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
 
     if modelo_sel.startswith("1"):
         st.subheader("🎲 Simulación Monte Carlo: Valor en Riesgo (VaR) Cambiario")
-        st.markdown("""
-        Utiliza un **Movimiento Browniano Geométrico** para simular miles de trayectorias posibles para la TRM en los próximos días, basándose en la volatilidad histórica real.
-        """)
-
+        
         if not (facturas_file and monetizaciones_file):
-            st.warning("⚠️ Sube los archivos de CxC (USD) y Monetizaciones en la barra lateral para leer tu saldo vivo y calcular el riesgo.")
+            st.warning("⚠️ Sube los archivos de CxC (USD) y Monetizaciones para ejecutar el motor Monte Carlo.")
             return
 
-        with st.spinner("Procesando datos históricos y ejecutando motor Monte Carlo..."):
-            # 1. Obtener el saldo vivo actual de la empresa
+        with st.spinner("Ejecutando 10,000 simulaciones estocásticas..."):
+            # --- (Mantenemos la lógica de cálculo que ya teníamos) ---
             df_facturas = cargar_facturas(facturas_file)
             df_mon = cargar_monetizaciones(monetizaciones_file)
             saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
 
-            # 2. Descargar 1 año de historia de la TRM para calcular Volatilidad
             hoy = pd.Timestamp.today().normalize()
-            hace_un_ano = hoy - pd.Timedelta(days=365)
-            df_trm = descargar_trm_historica(hace_un_ano, hoy)
+            df_trm = descargar_trm_historica(hoy - pd.Timedelta(days=365), hoy)
             trm_actual = float(df_trm["trm"].iloc[-1])
 
-            # 3. Cálculos Econométricos (Retornos logarítmicos)
             df_trm['Retorno_Log'] = np.log(df_trm['trm'] / df_trm['trm'].shift(1))
-            mu = df_trm['Retorno_Log'].mean()
-            sigma = df_trm['Retorno_Log'].std()
+            mu, sigma = df_trm['Retorno_Log'].mean(), df_trm['Retorno_Log'].std()
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Saldo Expuesto (USD)", f"${saldo_vivo_usd:,.0f}")
-            c2.metric("TRM Hoy", f"${trm_actual:,.2f}")
-            c3.metric("Rend. Diario Esperado (μ)", f"{mu:.4%}")
-            c4.metric("Volatilidad Diaria (σ)", f"{sigma:.4%}")
+            # Parámetros (Ajustados para el ejemplo)
+            horizonte_dias = 30
+            num_simulaciones = 10000
+            nivel_confianza = 0.95
 
-            # 4. Parámetros de Simulación (Interactivos)
-            st.markdown("#### ⚙️ Parámetros de Simulación")
-            col_p1, col_p2, col_p3 = st.columns(3)
-            horizonte_dias = col_p1.slider("Horizonte de Riesgo (Días)", min_value=5, max_value=60, value=30, step=5)
-            num_simulaciones = col_p2.selectbox("Número de Simulaciones", [1000, 5000, 10000], index=1)
-            nivel_confianza = col_p3.selectbox("Nivel de Confianza (VaR)", [0.90, 0.95, 0.99], index=1)
-
-            # 5. MOTOR MONTE CARLO (Ecuación Diferencial Estocástica)
             Z = np.random.standard_normal((horizonte_dias, num_simulaciones))
-            # Matriz para guardar los caminos
-            caminos_trm = np.zeros_like(Z)
-            caminos_trm[0] = trm_actual
-
-            # Loop para generar los saltos diarios (Movimiento Browniano Geométrico)
+            caminos_trm = np.zeros_like(Z); caminos_trm[0] = trm_actual
             for t in range(1, horizonte_dias):
                 caminos_trm[t] = caminos_trm[t-1] * np.exp((mu - (sigma**2) / 2) + sigma * Z[t])
 
-            # 6. Cálculo del Value at Risk (VaR)
-            trm_finales = caminos_trm[-1] # Tomamos la última fila (el día final simulado)
-            # El VaR mira el peor escenario (la cola izquierda de la distribución de la TRM)
-            trm_peor_escenario = np.percentile(trm_finales, (1 - nivel_confianza) * 100)
-            
-            valor_cartera_hoy = saldo_vivo_usd * trm_actual
-            valor_cartera_peor_escenario = saldo_vivo_usd * trm_peor_escenario
-            var_pesos = valor_cartera_hoy - valor_cartera_peor_escenario
+            trm_peor_escenario = np.percentile(caminos_trm[-1], (1 - nivel_confianza) * 100)
+            var_pesos = (saldo_vivo_usd * trm_actual) - (saldo_vivo_usd * trm_peor_escenario)
 
-            st.error(f"🚨 **Valor en Riesgo (VaR) a {horizonte_dias} días al {nivel_confianza*100}% de confianza:** El modelo estocástico indica que en el peor de los casos (excluyendo el {round((1-nivel_confianza)*100, 1)}% de eventos extremos o cisnes negros), la empresa no perderá más de **${var_pesos:,.0f} COP** por devaluación del dólar.")
-            st.info(f"📉 En ese escenario pesimista crítico, la TRM caería a **${trm_peor_escenario:,.2f}**.")
+            # --- VISUALIZACIÓN DE RESULTADOS ---
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Saldo Expuesto", f"${saldo_vivo_usd:,.0f} USD")
+            c2.metric("TRM de Estrés (95%)", f"${trm_peor_escenario:,.2f}")
+            c3.metric("Pérdida Máxima Estocástica", f"${var_pesos:,.0f} COP", delta_color="inverse")
 
-            # 7. Visualización Científica
-            st.markdown("#### 📊 Distribución de Trayectorias y Frecuencias")
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5), gridspec_kw={'width_ratios': [2, 1]})
-            
-            # Gráfica 1: Las 100 primeras trayectorias (para no saturar visualmente)
-            ax1.plot(caminos_trm[:, :100], alpha=0.3, color='#3498db', linewidth=1)
-            ax1.axhline(trm_actual, color='black', linestyle='--', label=f'TRM Hoy ({trm_actual:,.2f})')
-            ax1.axhline(trm_peor_escenario, color='red', linestyle='-', linewidth=2, label=f'Límite Riesgo VaR ({trm_peor_escenario:,.2f})')
-            ax1.set_title(f"Muestra de Trayectorias Simuladas (Movimiento Browniano)")
-            ax1.set_xlabel("Días hacia el futuro")
-            ax1.set_ylabel("TRM Simulada")
-            ax1.legend()
-            ax1.spines['top'].set_visible(False)
-            ax1.spines['right'].set_visible(False)
+            # Gráficas
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(caminos_trm[:, :100], alpha=0.3, color='#3498db')
+            ax.axhline(trm_peor_escenario, color='red', label='Límite de Riesgo (VaR)')
+            ax.set_title("Simulación de 10,000 Escenarios TRM"); ax.legend(); st.pyplot(fig)
 
-            # Gráfica 2: Histograma de las 10,000 TRMs finales
-            ax2.hist(trm_finales, bins=50, color='#2ecc71', alpha=0.7, edgecolor='black', density=True)
-            ax2.axvline(trm_actual, color='black', linestyle='--', linewidth=2)
-            ax2.axvline(trm_peor_escenario, color='red', linestyle='-', linewidth=2)
-            ax2.set_title("Distribución de Probabilidad a Término")
-            ax2.set_xlabel("TRM Final")
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
-
-            st.pyplot(fig)
+            # ========================================================
+            # NUEVA SECCIÓN: INTERPRETACIÓN PARA LA JUNTA DIRECTIVA
+            # ========================================================
+            st.markdown("---")
+            with st.expander("💡 **Guía de Interpretación para la Junta Directiva (No Financieros)**", expanded=True):
+                st.write(f"""
+                ### ¿Qué significa este análisis para la toma de decisiones?
+                
+                Este módulo no intenta "predecir" el futuro, sino **estresar la realidad** de la empresa para que la Dirección no tome decisiones a ciegas.
+                
+                **1. El Experimento de los 10,000 Universos:**
+                Imagine que podemos vivir el próximo mes 10,000 veces. El gráfico azul muestra 100 de esos caminos posibles. En algunos el dólar sube y ganamos, pero en otros baja y perdemos.
+                
+                **2. ¿Qué es el Valor en Riesgo (VaR)?**
+                Es nuestro **"Techo de Pérdida Esperada"**. El modelo nos dice que, con un 95% de certeza, el impacto negativo de la moneda en nuestra caja **no superará los ${var_pesos:,.0f} COP** en los próximos {horizonte_dias} días. 
+                
+                **3. Aplicación Estratégica para la Junta:**
+                * **¿Necesitamos un Seguro?**: Si esa cifra de pérdida potencial (${var_pesos:,.0f}) pone en riesgo el pago de la nómina o proveedores, la Junta debería autorizar la contratación de una cobertura cambiaria (*Forward*).
+                * **Gestión de Provisiones**: Este número le dice al Gerente cuánto dinero debería tener "en reserva" para absorber un mal movimiento del mercado sin entrar en crisis de liquidez.
+                * **Tranquilidad basada en Datos**: En lugar de reaccionar con pánico a las noticias diarias, la Junta puede ver que, estadísticamente, el riesgo está bajo control dentro de los límites calculados.
+                
+                *Nota técnica: El modelo utiliza el 'Movimiento Browniano Geométrico', un estándar en la banca de inversión para modelar activos volátiles.*
+                """)
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
