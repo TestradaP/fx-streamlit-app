@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from io import BytesIO
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -18,15 +20,8 @@ try:
 except ImportError:
     FPDF = None
 
-# Imports para AI Agent
-try:
-    import openai
-    from langchain_experimental.agents import create_pandas_dataframe_agent
-    from langchain_openai import ChatOpenAI
-except ImportError:
-    openai = None
-    create_pandas_dataframe_agent = None
-    ChatOpenAI = None
+# AI imports moved to lazy loading for faster startup
+genai = None
 
 # =========================
 # CONFIGURACIÓN DE PÁGINA
@@ -63,6 +58,129 @@ def calcular_cuota_mensual(valor_credito, tasa_ea, meses):
     tasa_mensual = (1 + tasa_ea)**(1/12) - 1
     if tasa_mensual == 0: return valor_credito / meses
     return valor_credito * (tasa_mensual * (1 + tasa_mensual)**meses) / ((1 + tasa_mensual)**meses - 1)
+
+# =========================
+# LAZY LOADING PARA AI AGENT (Carga solo cuando se necesita)
+# =========================
+def lazy_load_ai_libraries():
+    """Carga la librería de Google Gemini solo cuando se necesita (lazy loading)."""
+    global genai
+    if genai is not None:  # Ya cargada
+        return True
+    try:
+        import google.generativeai as genai_lib
+        genai = genai_lib
+        return True
+    except ImportError:
+        return False
+
+def discover_gemini_model(api_key: str) -> list[str]:
+    """Descubre los modelos Gemini compatibles con generateContent."""
+    if genai is None:
+        return []
+
+    genai.configure(api_key=api_key)
+    candidates = []
+    try:
+        for model in genai.list_models():
+            if hasattr(model, "supported_generation_methods") and "generateContent" in model.supported_generation_methods:
+                candidates.append(model.name)
+    except Exception:
+        pass
+
+    if not candidates:
+        candidates = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.0",
+            "models/gemini-1.5",
+            "models/gemini-1.5-flash-002",
+        ]
+    return candidates
+
+
+def _extract_invoice_from_question(question: str) -> Optional[str]:
+    match = re.search(r"factura\s*#?\s*(\d+)", question, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"\b(\d{4,})\b", question)
+    return match.group(1) if match else None
+
+
+def query_gemini_with_dataframe(df: pd.DataFrame, question: str, api_key: str, df_trm: Optional[pd.DataFrame] = None, trm_actual: Optional[float] = None, trm_ayer: Optional[float] = None, df_monetizaciones: Optional[pd.DataFrame] = None) -> str:
+    """Consulta Google Gemini con contexto del DataFrame."""
+    if genai is None:
+        return "Error: Gemini no está disponible"
+
+    genai.configure(api_key=api_key)
+    invoice_id = _extract_invoice_from_question(question)
+    invoice_details = []
+    if invoice_id is not None and "factura" in df.columns:
+        df_invoice = df[df["factura"].astype(str) == invoice_id]
+        if not df_invoice.empty:
+            invoice_details.append("Detalles específicos de la factura encontrada:")
+            invoice_details.append(df_invoice.to_string(index=False))
+            invoice_details.append("")
+            if df_monetizaciones is not None and not df_monetizaciones.empty:
+                monetizaciones_invoice = df_monetizaciones[df_monetizaciones["factura"].astype(str) == invoice_id]
+                if not monetizaciones_invoice.empty:
+                    invoice_details.append("Monetizaciones asociadas a esta factura:")
+                    invoice_details.append(monetizaciones_invoice.to_string(index=False))
+                    invoice_details.append("")
+
+    prompt_parts = [
+        "Tengo un DataFrame con los siguientes datos:",
+        f"- Columnas: {list(df.columns)}",
+        f"- Filas: {len(df)}",
+        "- Estadísticas numéricas:",
+        df.describe().to_string(),
+        "",
+    ]
+
+    if invoice_details:
+        prompt_parts.extend(invoice_details)
+    else:
+        prompt_parts.extend([
+            "Datos muestra (primeras 5 filas):",
+            df.head().to_string(),
+            "",
+        ])
+
+    if df_trm is not None and not df_trm.empty:
+        trm_min = df_trm["fecha"].min()
+        trm_max = df_trm["fecha"].max()
+        prompt_parts.extend([
+            "TRM histórica descargada automáticamente por el sistema:",
+            f"- Fecha inicial TRM: {trm_min.strftime('%Y-%m-%d') if pd.notnull(trm_min) else 'N/A'}",
+            f"- Fecha final TRM: {trm_max.strftime('%Y-%m-%d') if pd.notnull(trm_max) else 'N/A'}",
+            f"- TRM actual usada en los cálculos: {trm_actual if trm_actual is not None else 'N/A'}",
+            f"- TRM ayer: {trm_ayer if trm_ayer is not None else 'N/A'}",
+            "- Últimos días de la TRM:",
+            df_trm.tail(7).to_string(index=False),
+            "",
+        ])
+
+    prompt_parts.extend([
+        "IMPORTANTE: Usa solo los datos reales proporcionados por el sistema y no valores hipotéticos.",
+        "Si la pregunta es sobre riesgo cambiario, diferencias de TRM o reintegro de facturas, responde con base en los datos del DataFrame, las monetizaciones y la TRM real descargada.",
+        "No inventes fechas, tasas ni valores que no estén disponibles en los datos.",
+        "Pregunta del usuario:",
+        question,
+        "",
+        "Responde con exactitud usando los datos proporcionados."
+    ])
+
+    prompt = "\n".join(prompt_parts)
+    candidate_models = discover_gemini_model(api_key)
+    last_error = None
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            last_error = e
+
+    raise RuntimeError(f"No fue posible usar Gemini con los modelos disponibles. Último error: {last_error}")
 
 # =========================
 # VALIDACIONES Y CARGA (Facturas, Monetizaciones y COMPRAS)
@@ -1261,16 +1379,13 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
     f_liq, ax1 = plt.subplots(); ax1.bar(["Activo", "Pasivo"], [vals.get("Activo Corriente",0), vals.get("Pasivo Corriente",0)], color=["#2ecc71", "#e74c3c"]); ax1.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
     f_marg, ax2 = plt.subplots(); ax2.bar(["Margen Neto", "ROE"], [kpis["Margen Neto"], kpis["ROE"]], color="#3498db"); ax2.yaxis.set_major_formatter(FuncFormatter(formato_porcentaje))
 
-    # Preparar agentes AI si disponible
-    agentes = {}
-    if openai and create_pandas_dataframe_agent and ChatOpenAI:
-        openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password", key="openai_key")
-        if openai_api_key:
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo")
-            agentes["CxC"] = create_pandas_dataframe_agent(llm, df_f, verbose=True)
-            agentes["CxP"] = create_pandas_dataframe_agent(llm, df_c, verbose=True)
-            agentes["Estados Financieros"] = create_pandas_dataframe_agent(llm, pd.DataFrame([vals]), verbose=True)
+    # Preparar Gemini AI si disponible (lazy loading)
+    gemini_api_key = None
+    ai_available = lazy_load_ai_libraries()
+    if ai_available:
+        gemini_api_key = st.sidebar.text_input("Google Gemini API Key (GRATIS)", type="password", key="gemini_key")
+        if gemini_api_key:
+            st.sidebar.success("✅ API Key configurada")
 
     tab_resumen, tab_ai = st.tabs(["📊 Resumen Ejecutivo", "🤖 AI Assistant"])
 
@@ -1289,17 +1404,25 @@ def app_resumen_ejecutivo_full(f_usd, m_usd, f_compras, eeff_files):
             st.download_button("📄 Descargar Reporte de Junta Directiva (PDF)", data=pdf_data, file_name="Reporte_Gerencial_PRO.pdf", mime="application/pdf")
 
     with tab_ai:
-        if not agentes:
-            st.warning("🤖 AI Assistant requiere instalar 'openai' y 'langchain', y proporcionar una API Key de OpenAI en la barra lateral.")
+        if not ai_available:
+            st.error("🤖 AI Assistant no disponible. Instala las dependencias con: `pip install google-generativeai`")
+        elif not gemini_api_key:
+            st.warning("🤖 Proporciona tu Google Gemini API Key gratis en la barra lateral para activar el AI Assistant.")
+            st.info("📌 **Cómo obtener una API Key gratis de Google Gemini:**\n1. Ve a https://ai.google.dev/\n2. Haz clic en 'Get API Key'\n3. Selecciona o crea un proyecto\n4. Copia la API Key\n5. Pégala en la barra lateral")
         else:
-            dataset = st.selectbox("Selecciona el conjunto de datos:", list(agentes.keys()))
+            dataset = st.selectbox("Selecciona el conjunto de datos:", ["Cuentas por Cobrar (CxC)", "Cuentas por Pagar (CxP)", "Estados Financieros"])
             pregunta = st.text_input("Haz una pregunta sobre los datos (ej: 'Calcula el promedio de saldos vivos' o 'Qué facturas tienen más de 1000 USD?')")
-            if st.button("Preguntar al AI"):
+            if st.button("Preguntar a Gemini AI"):
                 if pregunta.strip():
-                    with st.spinner("Procesando pregunta..."):
+                    with st.spinner("Procesando pregunta con Gemini..."):
                         try:
-                            respuesta = agentes[dataset].run(pregunta)
-                            st.success("Respuesta del AI:")
+                            if dataset == "Cuentas por Cobrar (CxC)":
+                                respuesta = query_gemini_with_dataframe(df_f, pregunta, gemini_api_key, df_trm, trm_h, trm_a, df_mon)
+                            elif dataset == "Cuentas por Pagar (CxP)":
+                                respuesta = query_gemini_with_dataframe(df_c, pregunta, gemini_api_key)
+                            else:  # Estados Financieros
+                                respuesta = query_gemini_with_dataframe(pd.DataFrame([vals]), pregunta, gemini_api_key)
+                            st.success("✅ Respuesta de Gemini AI:")
                             st.write(respuesta)
                         except Exception as e:
                             st.error(f"Error al procesar la pregunta: {e}")
