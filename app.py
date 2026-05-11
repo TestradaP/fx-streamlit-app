@@ -9,12 +9,14 @@ from typing import Optional
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
+import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
+from statsmodels.tsa.arima.model import ARIMA
 
 # Intentar importar FPDF para los reportes en PDF
 try:
@@ -1757,98 +1759,117 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
                 * **Gestión de Cobranzas Priorizada:** No gastamos energía llamando a todos los clientes. El equipo de cartera debe enfocar el 100% de sus esfuerzos en las facturas marcadas con etiqueta **🔴 Riesgo Alto** antes de que se venzan.
                 * **Política de Crédito:** Si el modelo (ver gráfica) demuestra empíricamente que las facturas de alto valor tienen mayor riesgo sistémico de impago, la Junta puede exigir que los contratos grandes lleven un anticipo obligatorio mayor o pólizas de seguro de crédito.
                 """)
-        # ========================================================
-    # MODELO 4: COBERTURAS CAMBIARIAS (FORWARDS)
+    # ========================================================
+    # MODELO 4: COBERTURAS CAMBIARIAS (FORWARDS CON ARIMA)
     # ========================================================
     elif modelo_sel.startswith("4"):
         st.subheader("🛡️ Simulador de Coberturas Cambiarias (Derivados - Forwards)")
-        st.markdown("Calcula el precio teórico de un contrato Forward (Paridad de Tasas de Interés) para blindar la cartera contra la volatilidad del dólar, asegurando hoy la tasa de cambio del futuro.")
+        st.markdown("Calcula el precio teórico de un contrato Forward (Paridad de Tasas) y compáralo contra proyecciones econométricas de la TRM.")
 
         if not (facturas_file and monetizaciones_file):
             st.warning("⚠️ Sube los archivos de CxC (USD) y Monetizaciones en la barra lateral para evaluar la cobertura sobre tu saldo vivo.")
             return
 
-        with st.spinner("Calculando paridad de tasas de interés y simulando escenarios de cobertura..."):
-            df_facturas = cargar_facturas(facturas_file)
-            df_mon = cargar_monetizaciones(monetizaciones_file)
-            saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
+        df_facturas = cargar_facturas(facturas_file)
+        df_mon = cargar_monetizaciones(monetizaciones_file)
+        saldo_vivo_usd = df_facturas['valor_usd'].sum() - df_mon['monto_usd'].sum() if not df_mon.empty else df_facturas['valor_usd'].sum()
 
-            hoy = pd.Timestamp.today().normalize()
-            df_trm = descargar_trm_historica(hoy - pd.Timedelta(days=5), hoy)
-            trm_spot = float(df_trm["trm"].iloc[-1])
+        # Descargamos 1 año de historia para entrenar el modelo
+        hoy = pd.Timestamp.today().normalize()
+        df_trm_hist = descargar_trm_historica(hoy - pd.Timedelta(days=365), hoy)
+        trm_spot = float(df_trm_hist["trm"].iloc[-1])
 
-            st.markdown("#### ⚙️ Parámetros del Mercado y Expectativas")
-            c1, c2, c3, c4 = st.columns(4)
-            dias_forward = c1.number_input("Plazo de Cobertura (Días)", value=90, step=15)
-            tasa_cop = c2.number_input("Tasa Libre Riesgo COP (%)", value=11.5, step=0.5, help="Ej: Tasa IBR o TES en Colombia")
-            tasa_usd = c3.number_input("Tasa Libre Riesgo USD (%)", value=5.25, step=0.25, help="Ej: Tasa SOFR o T-Bills en USA")
-            trm_esperada = c4.number_input("TRM Proyectada a Vencimiento", value=float(trm_spot * 0.95), step=50.0, help="¿A cuánto crees que caerá (o subirá) el dólar en ese plazo?")
+        st.markdown("#### ⚙️ 1. Parámetros de Cobertura")
+        c1, c2, c3 = st.columns(3)
+        dias_forward = c1.number_input("Plazo de Cobertura (Días)", value=90, step=15)
+        tasa_cop = c2.number_input("Tasa Libre Riesgo COP (%)", value=11.5, step=0.5)
+        tasa_usd = c3.number_input("Tasa Libre Riesgo USD (%)", value=5.25, step=0.25)
 
-            # 1. Cálculo Teórico del Forward (Paridad de Tasas de Interés - Convención Actual/360)
-            tasa_cop_dec = tasa_cop / 100
-            tasa_usd_dec = tasa_usd / 100
-            
-            forward_rate = trm_spot * ((1 + tasa_cop_dec * (dias_forward / 360)) / (1 + tasa_usd_dec * (dias_forward / 360)))
+        st.markdown("#### 🤖 2. Proyección de la TRM a Vencimiento (Escenario Desnudo)")
+        tipo_proyeccion = st.radio(
+            "Selecciona el método de estimación para comparar contra el Forward:",
+            ("📉 Modelo Econométrico (ARIMA)", "✍️ Ingreso Manual (Escenario de Estrés Directivo)")
+        )
 
-            # 2. Simulación de Escenarios
-            valor_cartera_spot = saldo_vivo_usd * trm_spot
-            valor_cartera_forward = saldo_vivo_usd * forward_rate
-            valor_cartera_esperado = saldo_vivo_usd * trm_esperada
-            
-            ahorro_vs_esperado = valor_cartera_forward - valor_cartera_esperado
-
-            # 3. Métricas Financieras
-            st.markdown("#### 🎯 Resultados Financieros")
-            r1, r2, r3 = st.columns(3)
-            r1.metric("TRM Spot (Hoy)", f"${trm_spot:,.2f}")
-            r2.metric("TRM Forward (Garantizada)", f"${forward_rate:,.2f}", delta=f"{(forward_rate/trm_spot - 1)*100:.2f}% Prima", delta_color="normal")
-            r3.metric("Valor Cartera Cubierta", f"${valor_cartera_forward:,.0f} COP")
-
-            if ahorro_vs_esperado > 0:
-                st.success(f"✅ **Decisión Rentable:** Si la TRM cae a ${trm_esperada:,.2f} como temes, haber firmado el Forward hoy te salvará de perder **${ahorro_vs_esperado:,.0f} COP** frente al mercado desnudo.")
-            else:
-                st.error(f"❌ **Costo de Oportunidad:** Si la TRM sube a ${trm_esperada:,.2f}, haber tomado el Forward te habrá hecho dejar de ganar **${abs(ahorro_vs_esperado):,.0f} COP**. Sin embargo, compraste certidumbre absoluta.")
-
-            # 4. Visualización Gráfica
-            st.markdown("#### 📊 Escenario: Cubierto (Hedged) vs. Desnudo (Unhedged)")
-            fig4, ax_fwd = plt.subplots(figsize=(10, 4))
-            
-            escenarios = ['Cartera a TRM Hoy', 'Cartera Asegurada (Forward)', 'Cartera Desnuda (TRM Esperada)']
-            valores = [valor_cartera_spot, valor_cartera_forward, valor_cartera_esperado]
-            colores = ['#95a5a6', '#2ecc71', '#e74c3c' if trm_esperada < forward_rate else '#f1c40f']
-
-            bars = ax_fwd.bar(escenarios, valores, color=colores, width=0.5)
-            ax_fwd.set_ylabel("Valor en Pesos (COP)")
-            
-            # Formateador seguro para los ejes
-            ax_fwd.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
-            ax_fwd.spines['top'].set_visible(False)
-            ax_fwd.spines['right'].set_visible(False)
-
-            # Etiquetas numéricas sobre las barras
-            for bar in bars:
-                yval = bar.get_height()
-                ax_fwd.text(bar.get_x() + bar.get_width()/2, yval, f'${yval:,.0f}', ha='center', va='bottom', fontweight='bold')
-
-            st.pyplot(fig4)
-
-            # 5. Explicación Gerencial
-            st.markdown("---")
-            with st.expander("💡 **Guía de Interpretación para la Junta Directiva (No Financieros)**", expanded=True):
-                st.write(f'''
-                ### El Derivado Financiero como "Seguro Operativo"
+        if tipo_proyeccion == "✍️ Ingreso Manual (Escenario de Estrés Directivo)":
+            trm_esperada = st.number_input("Digita la TRM Proyectada a Vencimiento", value=float(trm_spot * 0.95), step=50.0)
+            st.info("👆 Estás evaluando un escenario subjetivo definido por la gerencia para pruebas de estrés.")
+        else:
+            with st.spinner(f"Entrenando modelo econométrico ARIMA con 365 datos históricos..."):
+                # Entrenamiento del modelo ARIMA(1, 1, 1) - Estándar para series financieras
+                serie_trm = df_trm_hist['trm'].values
+                modelo_arima = ARIMA(serie_trm, order=(1, 1, 1))
+                resultado_arima = modelo_arima.fit()
                 
-                En mercados emergentes volátiles como Colombia, depender de la "suerte" del dólar es jugar a la ruleta con el margen neto de la compañía.
+                # Predicción a N días (el plazo del forward)
+                forecast = resultado_arima.forecast(steps=int(dias_forward))
+                trm_esperada = float(forecast[-1])
                 
-                **1. ¿Qué es un Forward?**
-                Es un contrato legal con el banco donde acordamos **hoy** vender nuestros dólares futuros a una tasa fija inamovible (en este caso, **${forward_rate:,.2f}**). Pase lo que pase con el mercado real dentro de {dias_forward} días, el banco nos respetará esa tasa.
-                
-                **2. ¿Cómo se calcula esa tasa? ¿Es adivinanza?**
-                No, es pura matemática de arbitraje. El banco mira cuánto pagan los intereses sin riesgo en Colombia ({tasa_cop}%) vs. cuánto pagan en Estados Unidos ({tasa_usd}%) y compensa esa diferencia proyectándola hacia el futuro.
-                
-                **3. La regla de oro para la Junta Directiva:**
-                Un derivado financiero no se contrata para "volvernos ricos apostando contra el dólar". Se contrata para **comprar tranquilidad**. Al firmar el Forward, el equipo de tesorería puede decirle hoy mismo a Producción y Ventas cuál es el presupuesto de caja exacto en pesos con el que cuentan, aislando a J.M. Estrada S.A. del ruido macroeconómico global.
-                ''')
+                st.success(f"🧠 El modelo ARIMA proyecta que la tendencia matemática sitúa la TRM en **${trm_esperada:,.2f}** dentro de {dias_forward} días.")
+
+        # 1. Cálculo Teórico del Forward (Paridad de Tasas de Interés)
+        tasa_cop_dec = tasa_cop / 100
+        tasa_usd_dec = tasa_usd / 100
+        
+        forward_rate = trm_spot * ((1 + tasa_cop_dec * (dias_forward / 360)) / (1 + tasa_usd_dec * (dias_forward / 360)))
+
+        # 2. Simulación de Escenarios
+        valor_cartera_spot = saldo_vivo_usd * trm_spot
+        valor_cartera_forward = saldo_vivo_usd * forward_rate
+        valor_cartera_esperado = saldo_vivo_usd * trm_esperada
+        
+        ahorro_vs_esperado = valor_cartera_forward - valor_cartera_esperado
+
+        # 3. Métricas Financieras
+        st.markdown("#### 🎯 3. Resultados Financieros y Toma de Decisión")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("TRM Spot (Hoy)", f"${trm_spot:,.2f}")
+        r2.metric("TRM Forward (Garantizada)", f"${forward_rate:,.2f}", delta=f"{(forward_rate/trm_spot - 1)*100:.2f}% Prima", delta_color="normal")
+        r3.metric("Valor Cartera Cubierta", f"${valor_cartera_forward:,.0f} COP")
+
+        if ahorro_vs_esperado > 0:
+            st.success(f"✅ **Cobertura Recomendada:** Frente al escenario proyectado (${trm_esperada:,.2f}), asegurar hoy la tasa Forward salvará **${ahorro_vs_esperado:,.0f} COP**.")
+        else:
+            st.error(f"⚠️ **Costo de Oportunidad Detectado:** Si la TRM se comporta según lo proyectado (${trm_esperada:,.2f}), el Forward representará un costo oculto de **${abs(ahorro_vs_esperado):,.0f} COP**. Decisión exclusiva por mitigación de volatilidad, no por rentabilidad.")
+
+        # 4. Visualización Gráfica
+        st.markdown("#### 📊 Comparativo: Cubierto (Hedged) vs. Desnudo (Unhedged)")
+        fig4, ax_fwd = plt.subplots(figsize=(10, 4))
+        
+        escenarios = ['Cartera a TRM Hoy', 'Cartera Asegurada (Forward)', 'Cartera Desnuda\n(TRM Proyectada)']
+        valores = [valor_cartera_spot, valor_cartera_forward, valor_cartera_esperado]
+        colores = ['#95a5a6', '#2ecc71', '#e74c3c' if trm_esperada < forward_rate else '#f1c40f']
+
+        bars = ax_fwd.bar(escenarios, valores, color=colores, width=0.5)
+        ax_fwd.set_ylabel("Valor en Pesos (COP)")
+        
+        ax_fwd.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+        ax_fwd.spines['top'].set_visible(False)
+        ax_fwd.spines['right'].set_visible(False)
+
+        for bar in bars:
+            yval = bar.get_height()
+            ax_fwd.text(bar.get_x() + bar.get_width()/2, yval, f'${yval:,.0f}', ha='center', va='bottom', fontweight='bold')
+
+        st.pyplot(fig4)
+
+        # 5. Explicación Gerencial
+        st.markdown("---")
+        with st.expander("💡 **Guía de Interpretación para la Junta Directiva (No Financieros)**", expanded=True):
+            st.write(f'''
+            ### El Derivado Financiero como "Seguro Operativo"
+            
+            En mercados emergentes volátiles como Colombia, depender de la "suerte" del dólar es jugar a la ruleta con el margen neto de la compañía.
+            
+            **1. ¿Qué es un Forward?**
+            Es un contrato legal con el banco donde acordamos **hoy** vender nuestros dólares futuros a una tasa fija inamovible (en este caso, **${forward_rate:,.2f}**). Pase lo que pase con el mercado real dentro de {int(dias_forward)} días, el banco nos respetará esa tasa.
+            
+            **2. ¿Cómo se calcula esa tasa? ¿Es adivinanza?**
+            No, es pura matemática de arbitraje. El banco mira cuánto pagan los intereses sin riesgo en Colombia ({tasa_cop}%) vs. cuánto pagan en Estados Unidos ({tasa_usd}%) y compensa esa diferencia proyectándola hacia el futuro.
+            
+            **3. La regla de oro para la Junta Directiva:**
+            Un derivado financiero no se contrata para "volvernos ricos apostando contra el dólar". Se contrata para **comprar tranquilidad**. Al firmar el Forward, el equipo de tesorería puede decirle hoy mismo a Producción y Ventas cuál es el presupuesto de caja exacto en pesos con el que cuentan, aislando a J.M. Estrada S.A. del ruido macroeconómico global.
+            ''')
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
