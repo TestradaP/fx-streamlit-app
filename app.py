@@ -1587,6 +1587,85 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
                 2. **El Peor Escenario (VaR)**: La línea roja identifica el punto donde las cosas se ponen difíciles. El modelo dice que hay un 95% de probabilidad de que la TRM no caiga por debajo de **${trm_peor_escenario:,.2f}**.
                 3. **Impacto en Dinero**: Si ese escenario ocurre, la empresa dejaría de percibir **${var_pesos:,.0f} COP**. Este es el número que debemos decidir si queremos cubrir con un seguro bancario o si la caja puede absorberlo.
                 """)
+    # ========================================================
+    # MODELO 2: MILLER-ORR (Pegar debajo del if del Monte Carlo)
+    # ========================================================
+    elif modelo_sel.startswith("2"):
+        st.subheader("🏦 Modelo Estocástico de Liquidez (Miller-Orr)")
+        st.markdown("Calcula los límites óptimos de efectivo para minimizar el costo de oportunidad de tener dinero ocioso y los costos de transacción de conseguir liquidez.")
+
+        # Parámetros del modelo
+        st.markdown("#### ⚙️ Parámetros de la Empresa")
+        c1, c2, c3, c4 = st.columns(4)
+        caja_minima = c1.number_input("Caja Mínima de Seguridad (L)", value=50000000, step=5000000)
+        costo_transaccion = c2.number_input("Costo por Transacción (b)", value=50000, step=5000, help="Costo de comprar/vender inversiones o adquirir deuda a muy corto plazo.")
+        tasa_anual = c3.number_input("Tasa de Interés Anual (%)", value=10.0, step=0.5, help="Costo de oportunidad (lo que rentaría ese dinero en un fondo a la vista o CDT).")
+        desv_diaria = c4.number_input("Volatilidad Diaria de Caja (σ)", value=15000000, step=1000000, help="Desviación estándar histórica de los flujos netos diarios en COP.")
+
+        # Cálculos Matemáticos de Miller-Orr
+        i_diario = (tasa_anual / 100) / 360
+        varianza = desv_diaria ** 2
+
+        if i_diario > 0:
+            Z_optimo = ((3 * costo_transaccion * varianza) / (4 * i_diario)) ** (1/3) + caja_minima
+            limite_superior = caja_minima + 3 * (Z_optimo - caja_minima)
+        else:
+            Z_optimo = caja_minima
+            limite_superior = caja_minima
+
+        # Mostrar métricas resultantes
+        st.markdown("#### 🎯 Resultados del Algoritmo")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Límite Inferior (L)", f"${caja_minima:,.0f}", help="Punto de alerta de iliquidez.")
+        r2.metric("Punto de Retorno (Z)", f"${Z_optimo:,.0f}", help="Nivel óptimo matemático de efectivo a mantener.")
+        r3.metric("Límite Superior (H)", f"${limite_superior:,.0f}", help="Punto máximo permitido antes de invertir el dinero.")
+
+        # Simulación de un Random Walk (Paseo Aleatorio) para mostrar la estrategia
+        st.markdown("#### 📊 Simulación de la Estrategia en Acción")
+        dias_sim = 60
+        caja_sim = np.zeros(dias_sim)
+        caja_sim[0] = Z_optimo
+        
+        # Generar los choques estocásticos para la gráfica
+        for t in range(1, dias_sim):
+            choque = np.random.normal(0, desv_diaria)
+            caja_sim[t] = caja_sim[t-1] + choque
+            # Aplicar reglas de Miller-Orr en la simulación
+            if caja_sim[t] >= limite_superior:
+                caja_sim[t] = Z_optimo # El tesorero invierte el exceso
+            elif caja_sim[t] <= caja_minima:
+                caja_sim[t] = Z_optimo # El tesorero liquida inversiones para fondear
+
+        fig2, ax_mo = plt.subplots(figsize=(12, 5))
+        ax_mo.plot(caja_sim, marker='o', markersize=4, color='#3498db', linewidth=1.5, label='Evolución del Saldo en Bancos')
+        ax_mo.axhline(limite_superior, color='#e74c3c', linestyle='--', linewidth=2, label=f'Límite Superior (Invertir Exceso)')
+        ax_mo.axhline(Z_optimo, color='#2ecc71', linestyle='-', linewidth=2, label=f'Punto Óptimo Matemático (Z)')
+        ax_mo.axhline(caja_minima, color='#f39c12', linestyle='--', linewidth=2, label=f'Límite Inferior (Alerta de Iliquidez)')
+        ax_mo.set_title("Estrategia de Gestión de Efectivo bajo Volatilidad Estocástica")
+        ax_mo.set_ylabel("Saldo en Bancos (COP)")
+        ax_mo.set_xlabel("Días de Operación")
+        ax_mo.yaxis.set_major_formatter(FuncFormatter(formato_pesos))
+        ax_mo.legend(loc='upper right')
+        ax_mo.spines['top'].set_visible(False)
+        ax_mo.spines['right'].set_visible(False)
+        st.pyplot(fig2)
+
+        # Explicación Gerencial
+        st.markdown("---")
+        with st.expander("💡 **Guía de Interpretación para la Junta Directiva (No Financieros)**", expanded=True):
+            st.write(f'''
+            ### ¿Por qué dejar demasiado dinero en el banco es un error?
+            
+            En finanzas operativas, el exceso de caja inactiva pierde valor constantemente debido a la inflación y al **costo de oportunidad** (el rendimiento que estaríamos ganando si ese capital estuviese en un fondo a la vista o pagando deudas caras).
+            
+            **1. ¿Qué soluciona este modelo?**
+            El algoritmo de Miller-Orr automatiza y quita la subjetividad a las decisiones de Tesorería. Calcula exactamente cuánto efectivo necesitamos para operar sin quedarnos ilíquidos, pero sin acumular dinero "perezoso".
+            
+            **2. Las 3 Reglas de Oro que el modelo le dicta al Tesorero:**
+            * **Si el banco llega a ${limite_superior:,.0f} (Línea Roja):** Tenemos un exceso de liquidez ineficiente. El tesorero debe retirar la diferencia e invertirla inmediatamente para que genere rentabilidad, devolviendo la caja a la Línea Verde.
+            * **Si el banco baja a ${caja_minima:,.0f} (Línea Naranja):** Estamos en riesgo de iliquidez operativa. El tesorero debe liquidar inversiones o usar crédito a corto plazo para reponer la caja hasta la Línea Verde.
+            * **Mientras el saldo rebote en el medio:** No se toma ninguna acción. Esto ahorra costos transaccionales bancarios y permite que la operación diaria respire de forma natural.
+            ''')
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
