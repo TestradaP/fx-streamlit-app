@@ -1706,14 +1706,13 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
             X_actual = df_scoring[['valor_usd', 'plazo_dias']].values
             df_scoring['Prob_Default (%)'] = modelo_logit.predict_proba(X_actual)[:, 1] * 100
             
-            # Clasificación de Riesgo según Basilea
-            condiciones = [
-                (df_scoring['Prob_Default (%)'] < 30),
-                (df_scoring['Prob_Default (%)'] >= 30) & (df_scoring['Prob_Default (%)'] < 60),
-                (df_scoring['Prob_Default (%)'] >= 60)
-            ]
-            etiquetas = ['🟢 Bajo', '🟡 Medio', '🔴 Alto']
-            df_scoring['Riesgo'] = np.select(condiciones, etiquetas)
+            # Clasificación de Riesgo según Basilea (Solución Robusta Pandas)
+            def clasificar_riesgo(prob):
+                if prob < 30: return '🟢 Bajo'
+                elif prob < 60: return '🟡 Medio'
+                else: return '🔴 Alto'
+                
+            df_scoring['Riesgo'] = df_scoring['Prob_Default (%)'].apply(clasificar_riesgo)
 
             # 4. Visualización de Resultados Quant
             st.markdown("#### 🎯 Calificación de Riesgo por Factura")
