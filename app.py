@@ -8,7 +8,10 @@ from io import BytesIO
 from typing import Optional
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-
+import uuid # Para generar un ID único para cada viaje
+import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -1856,6 +1859,80 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
             2. **El Payoff (Gráfico 2)**: Es la herramienta definitiva de decisión. La zona verde es el "seguro actuando": si el dólar se desploma, el derivado nos salva de perder esos millones. La zona roja es el "costo del seguro": si el dólar se dispara, dejaremos de ganar dinero extra porque estamos amarrados al contrato.
             3. **La Filosofía**: No compramos el Forward para especular en la zona verde, lo compramos para asegurarnos de que la caja de la empresa jamás se destruya en caso de una caída fuerte del dólar.
             """)
+
+# ========================================================
+# MÓDULO 10: CONTROL DE VIÁTICOS Y LEGALIZACIONES
+# ========================================================
+def app_viaticos():
+    st.title("🛫 Control de Viáticos y Legalizaciones")
+    st.markdown("Gestión estricta de anticipos y rendición de cuentas para equipos en terreno, con sincronización directa a base de datos (Google Sheets).")
+
+    # 1. CONEXIÓN A GOOGLE SHEETS
+    @st.cache_resource # Caché para no reconectar en cada clic
+    def conectar_gsheets():
+        try:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            # Llama al gafete (JSON) que guardaste en los secrets de Streamlit
+            creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+            client = gspread.authorize(creds)
+            return client.open("Viaticos_JMEstrada") # Debe llamarse exactamente así tu archivo
+        except Exception as e:
+            st.error(f"Error de conexión a la base de datos: {e}")
+            return None
+
+    db_viaticos = conectar_gsheets()
+    if not db_viaticos:
+        return
+
+    # Pestañas de navegación interna
+    tab1, tab2 = st.tabs(["📝 Fase 1: Solicitud de Anticipo", "🧾 Fase 2: Legalización (Próximamente)"])
+
+    with tab1:
+        st.subheader("Formulario de Solicitud (Pre-Viaje)")
+        st.info("Este formulario genera una Cuenta por Cobrar (CxC) temporal al empleado hasta que legalice con facturas.")
+        
+        # Usamos st.form para que la página no se recargue con cada tecla que presionas
+        with st.form("form_anticipo", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            solicitante = col1.text_input("Nombre del Solicitante / Coordinador")
+            conductor = col2.text_input("Nombre del Conductor / Instalador Principal")
+            
+            vehiculo = col1.selectbox("Vehículo Asignado (Placa)", ["Seleccionar...", "JME-123 (Camioneta)", "JME-456 (Furgón)", "Vehículo Particular", "Transporte Público"])
+            acompanantes = col2.text_area("Acompañantes (Separados por coma)", help="Ej: Juan Pérez, María Gómez")
+            
+            proyectos = st.multiselect("Proyecto(s) a visitar", ["Proyecto Alfa", "Proyecto Beta", "Mantenimiento Gamma", "Garantía Delta", "Otro"])
+            objetivo = st.text_input("Objetivo Principal de la Visita")
+            
+            monto = st.number_input("Presupuesto Solicitado ($ COP)", min_value=0, value=0, step=50000)
+            
+            st.markdown("---")
+            submitted = st.form_submit_button("🚀 Enviar Solicitud de Anticipo")
+            
+            if submitted:
+                if solicitante == "" or conductor == "" or monto == 0 or vehiculo == "Seleccionar...":
+                    st.error("⚠️ Por favor, llena todos los campos clave (Nombres, Vehículo y Monto).")
+                else:
+                    with st.spinner("Registrando viaje en la base de datos central..."):
+                        hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
+                        
+                        # Generamos datos automáticos
+                        id_viaje = str(uuid.uuid4())[:8].upper() # ID corto único (ej: 4F9A2B1C)
+                        fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        str_proyectos = " | ".join(proyectos)
+                        
+                        # Armamos la fila exacta como la definimos en tu Excel
+                        nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo, acompanantes, str_proyectos, objetivo, monto, "Aprobado - Pendiente Legalizar"]
+                        
+                        # Escribimos en Google Sheets
+                        hoja_anticipos.append_row(nueva_fila)
+                        
+                        st.success(f"✅ ¡Viaje registrado exitosamente! ID de Viaje: **{id_viaje}**")
+                        st.balloons()
+
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
@@ -1890,6 +1967,7 @@ def main():
         "7. Simulador Estratégico CCC",
         "8. Lectura del Histórico",
         "9. Laboratorio Quant (Avanzado)"
+        "10. Gestión de Viáticos y Legalizaciones"
     ))
     
     st.sidebar.markdown("---")
@@ -1909,6 +1987,7 @@ def main():
     elif app_sel == "7. Simulador Estratégico CCC": app_simulador_ccc()
     elif app_sel == "8. Lectura del Histórico": app_lectura_historico()
     elif app_sel == "9. Laboratorio Quant (Avanzado)": app_laboratorio_quant(f_usd, m_usd)
+    elif app_sel == "10. Control de Viáticos y Legalizaciones": app_viaticos()
 
 if __name__ == "__main__":
     main()
