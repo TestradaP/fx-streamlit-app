@@ -1987,7 +1987,7 @@ def main():
     elif app_sel == "7. Simulador Estratégico CCC": app_simulador_ccc()
     elif app_sel == "8. Lectura del Histórico": app_lectura_historico()
     elif app_sel == "9. Laboratorio Quant (Avanzado)": app_laboratorio_quant(f_usd, m_usd)
-    elif app_sel == "10. Control de Viáticos y Legalizaciones": app_viaticos()
+    elif app_sel == "10. Gestión de Viáticos y Legalizaciones": app_viaticos()
 
 if __name__ == "__main__":
     main()
