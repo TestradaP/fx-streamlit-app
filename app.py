@@ -1995,7 +1995,7 @@ def app_viaticos():
                         "Valor ($ COP)": st.column_config.NumberColumn("Valor ($ COP)", min_value=0, step=1000, required=True),
                         "Tipo Soporte": st.column_config.SelectboxColumn("Tipo Soporte (Filtro DIAN)", options=["Factura Electrónica", "RUT Comercio (Doc Soporte)", "Sin Soporte / Ticket POS"], required=True),
                         "Proyecto Imputado": st.column_config.SelectboxColumn("Proyecto Imputado", options=proyectos_viaje + ["Otro"], required=True),
-                        "Comentarios / NIT Comercio": st.column_config.TextColumn("NIT o Descripción", max_chars=100, placeholder="Ej: NIT 900123456 o Almuerzo")
+                        "Comentarios / NIT Comercio": st.column_config.TextColumn("NIT o Descripción", max_chars=100, help="Ej: NIT 900123456 o Almuerzo")
                     }
                 )
                 
