@@ -1861,20 +1861,17 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
             """)
 
 # ========================================================
-# MÓDULO 10: CONTROL DE VIÁTICOS Y LEGALIZACIONES (FULL)
+# MÓDULO 10: CONTROL DE VIÁTICOS Y LEGALIZACIONES (DINÁMICO + BI)
 # ========================================================
 def app_viaticos():
     st.title("🛫 Control de Viáticos y Legalizaciones")
-    st.markdown("Gestión estricta de anticipos y rendición de cuentas para equipos en terreno, con sincronización directa a base de datos (Google Sheets).")
+    st.markdown("Gestión estricta de anticipos, rendición de cuentas en tiempo real y analítica de costos por proyectos/vehículos.")
 
     # 1. CONEXIÓN A GOOGLE SHEETS
-    @st.cache_resource # Caché para no reconectar en cada clic
+    @st.cache_resource
     def conectar_gsheets():
         try:
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
             client = gspread.authorize(creds)
             return client.open("Viaticos_JMEstrada")
@@ -1887,174 +1884,204 @@ def app_viaticos():
         return
 
     # Pestañas de navegación interna
-    tab1, tab2 = st.tabs(["📝 Fase 1: Solicitud de Anticipo", "🧾 Fase 2: Legalización de Gastos"])
+    tab1, tab2, tab3 = st.tabs(["📝 Fase 1: Solicitud de Anticipo", "🧾 Fase 2: Legalización y Progreso", "📊 Dashboard de Costos (BI)"])
 
     # -------------------------------------------------------------------------
-    # TAB 1: FASE 1 - SOLICITUD DE ANTICIPO (PRE-VIAJE)
+    # TAB 1: FASE 1 - SOLICITUD DE ANTICIPO
     # -------------------------------------------------------------------------
     with tab1:
         st.subheader("Formulario de Solicitud (Pre-Viaje)")
-        st.info("Este formulario genera una Cuenta por Cobrar (CxC) temporal al empleado hasta que legalice con facturas.")
-        
         with st.form("form_anticipo", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            
             solicitante = col1.text_input("Nombre del Solicitante / Coordinador")
             conductor = col2.text_input("Nombre del Conductor / Instalador Principal")
-            
             vehiculo = col1.selectbox("Vehículo Asignado (Placa)", ["Seleccionar...", "JME-123 (Camioneta)", "JME-456 (Furgón)", "Vehículo Particular", "Transporte Público"])
-            acompanantes = col2.text_area("Acompañantes (Separados por coma)", help="Ej: Juan Pérez, María Gómez")
-            
+            acompanantes = col2.text_area("Acompañantes (Separados por coma)")
             proyectos = st.multiselect("Proyecto(s) a visitar", ["Proyecto Alfa", "Proyecto Beta", "Mantenimiento Gamma", "Garantía Delta", "Otro"])
             objetivo = st.text_input("Objetivo Principal de la Visita")
-            
             monto = st.number_input("Presupuesto Solicitado ($ COP)", min_value=0, value=0, step=50000)
             
-            st.markdown("---")
             submitted = st.form_submit_button("🚀 Enviar Solicitud de Anticipo")
-            
             if submitted:
                 if solicitante == "" or conductor == "" or monto == 0 or vehiculo == "Seleccionar...":
-                    st.error("⚠️ Por favor, llena todos los campos clave (Nombres, Vehículo y Monto).")
+                    st.error("⚠️ Por favor, llena todos los campos clave.")
                 else:
-                    with st.spinner("Registrando viaje en la base de datos central..."):
-                        hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
-                        
-                        id_viaje = str(uuid.uuid4())[:8].upper() # ID único de 8 caracteres
-                        fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        str_proyectos = " | ".join(proyectos) if proyectos else "Otro"
-                        
-                        nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo, acompanantes, str_proyectos, objetivo, monto, "Aprobado - Pendiente Legalizar"]
-                        hoja_anticipos.append_row(nueva_fila)
-                        
-                        st.success(f"✅ ¡Viaje registrado exitosamente! ID de Viaje: **{id_viaje}**")
-                        st.balloons()
+                    hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
+                    id_viaje = str(uuid.uuid4())[:8].upper()
+                    fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    str_proyectos = " | ".join(proyectos) if proyectos else "Otro"
+                    
+                    nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo, acompanantes, str_proyectos, objetivo, monto, "Abierto - En Proceso"]
+                    hoja_anticipos.append_row(nueva_fila)
+                    st.success(f"✅ ¡Viaje registrado! ID de Viaje: **{id_viaje}**")
+                    st.balloons()
 
     # -------------------------------------------------------------------------
-    # TAB 2: FASE 2 - LEGALIZACIÓN DE GASTOS (POST-VIAJE)
+    # TAB 2: FASE 2 - LEGALIZACIÓN CONTINUA (EDITABLE Y ABIERTA)
     # -------------------------------------------------------------------------
     with tab2:
-        st.subheader("🧾 Rendición de Cuentas y Cierre de Viaje")
-        st.markdown("Ingresa el ID del viaje generado en la Fase 1 para cargar el presupuesto asignado y relacionar los soportes.")
-        
-        id_buscar = st.text_input("🔑 Ingrese el ID del Viaje a Legalizar (8 caracteres):").strip().upper()
+        st.subheader("🧾 Rendición de Cuentas Continua")
+        id_buscar = st.text_input("🔑 Ingrese el ID del Viaje para trabajar en él:").strip().upper()
         
         if id_buscar:
             hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
-            datos_anticipos = hoja_anticipos.get_all_records()
+            hoja_legalizaciones = db_viaticos.worksheet("Legalizaciones")
             
-            # Buscador del viaje en la hoja de anticipos
-            viaje_encontrado = None
-            fila_index = None
-            for idx, row in enumerate(datos_anticipos):
-                if str(row.get("ID_Viaje")) == id_buscar:
-                    viaje_encontrado = row
-                    fila_index = idx + 2 # Ajuste de índice gspread (base 1 + fila de encabezado)
-                    break
+            datos_anticipos = hoja_anticipos.get_all_records()
+            viaje_encontrado = next((row for row in datos_anticipos if str(row.get("ID_Viaje")) == id_buscar), None)
             
             if not viaje_encontrado:
-                st.error("❌ No se encontró ningún viaje con ese ID. Por favor verifica el código.")
-            elif viaje_encontrado.get("Estado") == "Legalizado":
-                st.warning("⚠️ Este viaje ya fue legalizado previamente y se encuentra cerrado en contabilidad.")
+                st.error("❌ No se encontró ningún viaje con ese ID.")
             else:
-                st.success(f"✅ Viaje Vinculado Exitosamente: **{viaje_encontrado.get('Objetivo')}**")
+                # Mostrar Estado Actual del ID
+                estado_actual = viaje_encontrado.get("Estado", "Abierto - En Proceso")
+                st.info(f"📋 **Estado Actual del Viático:** `{estado_actual}`")
                 
-                # Resumen ejecutivo del viaje para control del usuario
                 v1, v2, v3 = st.columns(3)
-                v1.metric("Responsable del Dinero", viaje_encontrado.get("Conductor"))
+                v1.metric("Responsable", viaje_encontrado.get("Conductor"))
                 anticipo_monto = float(viaje_encontrado.get("Monto_Solicitado", 0))
-                v2.metric("Anticipo Consignado", f"${anticipo_monto:,.0f} COP")
-                
+                v2.metric("Anticipo", f"${anticipo_monto:,.0f} COP")
                 proyectos_viaje = viaje_encontrado.get("Proyectos", "Otro").split(" | ")
-                v3.markdown("**Proyectos Asociados Autorizados:**")
-                for p in proyectos_viaje:
-                    v3.markdown(f"- `{p}`")
+                v3.markdown("**Proyectos Autorizados:**")
+                for p in proyectos_viaje: v3.markdown(f"- `{p}`")
                 
                 st.markdown("---")
-                st.markdown("#### 📂 1. Matriz Digital de Gastos (Legalización Estilo Excel)")
-                st.markdown("Utiliza la tabla interactiva para agregar cada factura. Presiona **(+)** al final de la tabla para insertar filas.")
+                st.markdown("#### 📂 Facturas y Gastos Registrados")
                 
-                # Modelo de datos base para la tabla dinámica
-                df_modelo = pd.DataFrame([{
-                    "Fecha Gasto": datetime.date.today(),
-                    "Categoría": "Alimentación",
-                    "Valor ($ COP)": 0,
-                    "Tipo Soporte": "Factura Electrónica",
-                    "Proyecto Imputado": proyectos_viaje[0] if proyectos_viaje else "Otro",
-                    "Comentarios / NIT Comercio": ""
-                }])
+                # RECOLECTAR GASTOS PREVIOS DE GOOGLE SHEETS PARA ESTE ID
+                todos_los_gastos = hoja_legalizaciones.get_all_records()
+                gastos_previos = [g for g in todos_los_gastos if str(g.get("ID_Viaje")) == id_buscar]
                 
-                # MOTOR EDITABLE DE STREAMLIT (Control Estricto de Columnas)
+                if gastos_previos:
+                    df_base = pd.DataFrame(gastos_previos)
+                    # Convertir formatos de texto a tipos correctos para el editor
+                    df_base["Fecha Gasto"] = pd.to_datetime(df_base["Fecha_Gasto"]).dt.date
+                    df_base = df_base.rename(columns={
+                        "Categoria": "Categoría", "Valor": "Valor ($ COP)", 
+                        "Tipo_Soporte": "Tipo Soporte", "Proyecto_Imputado": "Proyecto Imputado", "Comentarios": "NIT o Descripción"
+                    })
+                    df_base = df_base[["Fecha Gasto", "Categoría", "Valor ($ COP)", "Tipo Soporte", "Proyecto Imputado", "NIT o Descripción"]]
+                    st.caption("💡 Se cargaron los gastos que habías guardado anteriormente. Puedes editarlos o agregar más filas abajo.")
+                else:
+                    df_base = pd.DataFrame([{
+                        "Fecha Gasto": datetime.date.today(), "Categoría": "Alimentación", "Valor ($ COP)": 0,
+                        "Tipo Soporte": "Factura Electrónica", "Proyecto Imputado": proyectos_viaje[0] if proyectos_viaje else "Otro", "NIT o Descripción": ""
+                    }])
+                
+                # TABLA DINÁMICA DE GASTOS
                 gastos_editados = st.data_editor(
-                    df_modelo,
-                    num_rows="dynamic",
-                    use_container_width=True,
+                    df_base, num_rows="dynamic", use_container_width=True,
                     column_config={
                         "Fecha Gasto": st.column_config.DateColumn("Fecha Gasto", required=True),
                         "Categoría": st.column_config.SelectboxColumn("Categoría", options=["Alimentación", "Hospedaje", "Gasolina", "Peajes", "Materiales", "Otros"], required=True),
                         "Valor ($ COP)": st.column_config.NumberColumn("Valor ($ COP)", min_value=0, step=1000, required=True),
-                        "Tipo Soporte": st.column_config.SelectboxColumn("Tipo Soporte (Filtro DIAN)", options=["Factura Electrónica", "RUT Comercio (Doc Soporte)", "Sin Soporte / Ticket POS"], required=True),
+                        "Tipo Soporte": st.column_config.SelectboxColumn("Tipo Soporte", options=["Factura Electrónica", "RUT Comercio (Doc Soporte)", "Sin Soporte / Ticket POS"], required=True),
                         "Proyecto Imputado": st.column_config.SelectboxColumn("Proyecto Imputado", options=proyectos_viaje + ["Otro"], required=True),
-                        "Comentarios / NIT Comercio": st.column_config.TextColumn("NIT o Descripción", max_chars=100, help="Ej: NIT 900123456 o Almuerzo")
+                        "NIT o Descripción": st.column_config.TextColumn("NIT o Descripción", max_chars=100, help="Ej: NIT o concepto")
                     }
                 )
                 
-                # --- MATRIZ DE CÁLCULO FINANCIERO Y FISCAL (EN VIVO) ---
+                # Cálculos Financieros en vivo
                 df_gastos = pd.DataFrame(gastos_editados)
                 total_gastado = df_gastos["Valor ($ COP)"].sum() if not df_gastos.empty else 0
-                
-                # Filtros fiscales para el ojo del CFO
-                total_deducible = df_gastos[df_gastos["Tipo Soporte"].isin(["Factura Electrónica", "RUT Comercio (Doc Soporte)"])]["Valor ($ COP)"].sum() if not df_gastos.empty else 0
-                total_no_deducible = df_gastos[df_gastos["Tipo Soporte"] == "Sin Soporte / Ticket POS"]["Valor ($ COP)"].sum() if not df_gastos.empty else 0
-                
                 balance = anticipo_monto - total_gastado
                 
-                st.markdown("#### 📊 2. Balance Financiero y Liquidación de Caja")
-                c_c1, c_c2, c_c3, c_c4 = st.columns(4)
-                c_c1.metric("Total Gastado", f"${total_gastado:,.0f} COP")
-                c_c2.metric("Deducible (Impuestos ✅)", f"${total_deducible:,.0f} COP")
-                c_c3.metric("Gasto Rechazado (❌)", f"${total_no_deducible:,.0f} COP", 
-                           delta=f"{total_no_deducible:,.0f} a Nómina" if total_no_deducible > 0 else None, delta_color="inverse")
-                
+                c_c1, c_c2 = st.columns(2)
+                c_c1.metric("Total Relacionado Hasta Ahora", f"${total_gastado:,.0f} COP")
                 if balance >= 0:
-                    c_c4.metric("Saldo a Reintegrar (Empleado)", f"${balance:,.0f} COP", delta="Sobra dinero", delta_color="normal")
+                    c_c2.metric("Saldo a favor de la Empresa", f"${balance:,.0f} COP")
                 else:
-                    c_c4.metric("Reembolsar a Empleado", f"${abs(balance):,.0f} COP", delta="Falta dinero", delta_color="inverse")
+                    c_c2.metric("Saldo a Reembolsar al Empleado", f"${abs(balance):,.0f} COP")
                 
-                # Alerta de Riesgo UGPP / DIAN Dinámica
-                if total_no_deducible > 0:
-                    st.warning(f"⚠️ **Alerta de Control Interno (CFO):** Se detectaron **${total_no_deducible:,.0f} COP** clasificados como 'Sin Soporte / Ticket POS'. Contabilidad no podrá deducir este gasto. Se sugiere aplicar descuento por nómina o exigir el Documento Soporte con RUT para mitigar riesgos salariales ante la UGPP.")
-                
-                st.markdown("---")
-                # Botón de Guardado Final
-                if st.button("💾 Finalizar y Registrar Legalización Contable"):
-                    if total_gastado == 0:
-                        st.error("⚠️ La matriz de gastos está vacía. Registra al menos un gasto antes de cerrar el viaje.")
-                    else:
-                        with st.spinner("Procesando transacciones en la nube de Google Sheets..."):
-                            hoja_legalizaciones = db_viaticos.worksheet("Legalizaciones")
-                            
-                            # 1. Empaquetamos todas las filas de la tabla editable para guardarlas en bloque
-                            filas_a_guardar = []
+                # BOTÓN DE GUARDADO SIN CERRAR EL ID
+                if st.button("💾 Guardar Cambios y Actualizar Base de Datos"):
+                    with st.spinner("Actualizando registros en Google Sheets..."):
+                        # 1. Limpieza de gastos viejos de este ID para no duplicar al sobreescribir
+                        todas_las_filas = hoja_legalizaciones.get_all_values()
+                        filas_limpias = [todas_las_filas[0]] # Mantenemos el encabezado
+                        for f in todas_las_filas[1:]:
+                            if f[0] != id_buscar: # Si no es este ID, se queda
+                                filas_limpias.append(f)
+                        
+                        # Re-escribimos la hoja limpia (sin los registros anteriores de este ID)
+                        hoja_legalizaciones.clear()
+                        hoja_legalizaciones.update(values=filas_limpias, range_name="A1")
+                        
+                        # 2. Insertamos la matriz de gastos actualizada de este ID
+                        if not df_gastos.empty and total_gastado > 0:
+                            nuevas_filas = []
                             for _, fila in df_gastos.iterrows():
-                                f_gasto = str(fila["Fecha Gasto"])
-                                cat = str(fila["Categoría"])
-                                val = float(fila["Valor ($ COP)"])
-                                sop = str(fila["Tipo Soporte"])
-                                proj = str(fila["Proyecto Imputado"])
-                                com = str(fila["Comentarios / NIT Comercio"])
-                                
-                                filas_a_guardar.append([id_buscar, f_gasto, cat, val, sop, proj, com])
-                            
-                            # Escritura masiva eficiente (ahorra cuota de la API)
-                            hoja_legalizaciones.append_rows(filas_a_guardar)
-                            
-                            # 2. Rompemos la Cuenta por Cobrar cambiando el estado del anticipo
-                            hoja_anticipos.update_cell(fila_index, 10, "Legalizado")
-                            
-                            st.success("🎉 ¡Viaje legalizado con éxito! El estado cambió a 'Legalizado' y los gastos se registraron de forma desagregada.")
-                            st.balloons()
-                            st.rerun()
+                                nuevas_filas.append([
+                                    id_buscar, str(fila["Fecha Gasto"]), str(fila["Categoría"]), 
+                                    float(fila["Valor ($ COP)"]), str(fila["Tipo Soporte"]), 
+                                    str(fila["Proyecto Imputado"]), str(fila["NIT o Descripción"])
+                                ])
+                            hoja_legalizaciones.append_rows(nuevas_filas)
+                        
+                        st.success("✅ Progreso guardado exitosamente. El ID sigue activo para continuar mañana.")
+                        st.rerun()
+
+    # -------------------------------------------------------------------------
+    # TAB 3: DASHBOARD GERENCIAL (BI) - COSTO PROYECTO Y VEHÍCULO
+    # -------------------------------------------------------------------------
+    with tab3:
+        st.subheader("📊 Business Intelligence: Analítica de Viáticos")
+        st.markdown("Análisis consolidado de costos reales extraídos directamente de las legalizaciones en la nube.")
+        
+        hoja_legalizaciones = db_viaticos.worksheet("Legalizaciones")
+        hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
+        
+        df_leg_bi = pd.DataFrame(hoja_legalizaciones.get_all_records())
+        df_ant_bi = pd.DataFrame(hoja_anticipos.get_all_records())
+        
+        if df_leg_bi.empty or df_ant_bi.empty:
+            st.warning("📊 Aún no hay suficientes datos legalizados para generar métricas estadísticas.")
+        else:
+            # Cruzamos los gastos con los anticipos para traer la información del vehículo usando el ID_Viaje
+            df_consolidado = pd.merge(df_leg_bi, df_ant_bi[['ID_Viaje', 'Vehiculo', 'Conductor']], on='ID_Viaje', how='left')
+            
+            # --- ANÁLISIS 1: COSTO TOTAL POR PROYECTO ---
+            st.markdown("### 🏗️ 1. Costo Total Acumulado por Proyecto")
+            costo_proyecto = df_consolidado.groupby("Proyecto_Imputado")["Valor"].sum().reset_index()
+            costo_proyecto = costo_proyecto.sort_values(by="Valor", ascending=False)
+            
+            fig_p, ax_p = plt.subplots(figsize=(10, 4))
+            bars = ax_p.barh(costo_proyecto["Proyecto_Imputado"], costo_proyecto["Valor"], color="#16a085")
+            ax_p.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x:,.0f}"))
+            ax_p.set_title("Inversión de Viáticos por Proyecto Contratado")
+            ax_p.spines['top'].set_visible(False); ax_p.spines['right'].set_visible(False)
+            # Etiquetas de valores en las barras
+            for bar in bars:
+                width = bar.get_width()
+                ax_p.text(width, bar.get_y() + bar.get_height()/2, f' ${width:,.0f}', va='center', ha='left', fontsize=9)
+            st.pyplot(fig_p)
+            
+            # --- ANÁLISIS 2: GASOLINA Y CONTROL DE VEHÍCULOS ---
+            st.markdown("---")
+            st.markdown("### 🚗 2. Control de Flota (Consumo de Gasolina por Vehículo)")
+            
+            # Filtramos estrictamente los gastos indexados en la categoría 'Gasolina'
+            df_gasolina = df_consolidado[df_consolidado["Categoria"] == "Gasolina"]
+            
+            if df_gasolina.empty:
+                st.info("⛽ Aún no se han registrado facturas bajo la categoría de 'Gasolina'.")
+            else:
+                costo_gasolina_vehiculo = df_gasolina.groupby("Vehiculo")["Valor"].sum().reset_index()
+                costo_gasolina_vehiculo = costo_gasolina_vehiculo.sort_values(by="Valor", ascending=False)
+                
+                col_bi1, col_bi2 = st.columns([1, 2])
+                
+                with col_bi1:
+                    st.markdown("**Tabla de Consumo Acumulado:**")
+                    st.dataframe(costo_gasolina_vehiculo.style.format({"Valor": "${:,.0f} COP"}), hide_index=True)
+                
+                with col_bi2:
+                    fig_v, ax_v = plt.subplots(figsize=(8, 4))
+                    ax_v.pie(costo_gasolina_vehiculo["Valor"], labels=costo_gasolina_vehiculo["Vehiculo"], 
+                             autopct=lambda p: f'{p:.1f}%\n(${p*costo_gasolina_vehiculo["Valor"].sum()/100:,.0f})',
+                             colors=["#e74c3c", "#34495e", "#f1c40f", "#3498db"])
+                    ax_v.set_title("Distribución del Gasto de Combustible")
+                    st.pyplot(fig_v)
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
