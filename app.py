@@ -1861,7 +1861,7 @@ def app_laboratorio_quant(facturas_file, monetizaciones_file):
             """)
 
 # ========================================================
-# MÓDULO 10: CONTROL DE VIÁTICOS Y LEGALIZACIONES
+# MÓDULO 10: CONTROL DE VIÁTICOS Y LEGALIZACIONES (FULL)
 # ========================================================
 def app_viaticos():
     st.title("🛫 Control de Viáticos y Legalizaciones")
@@ -1875,10 +1875,9 @@ def app_viaticos():
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive"
             ]
-            # Llama al gafete (JSON) que guardaste en los secrets de Streamlit
             creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
             client = gspread.authorize(creds)
-            return client.open("Viaticos_JMEstrada") # Debe llamarse exactamente así tu archivo
+            return client.open("Viaticos_JMEstrada")
         except Exception as e:
             st.error(f"Error de conexión a la base de datos: {e}")
             return None
@@ -1888,13 +1887,15 @@ def app_viaticos():
         return
 
     # Pestañas de navegación interna
-    tab1, tab2 = st.tabs(["📝 Fase 1: Solicitud de Anticipo", "🧾 Fase 2: Legalización (Próximamente)"])
+    tab1, tab2 = st.tabs(["📝 Fase 1: Solicitud de Anticipo", "🧾 Fase 2: Legalización de Gastos"])
 
+    # -------------------------------------------------------------------------
+    # TAB 1: FASE 1 - SOLICITUD DE ANTICIPO (PRE-VIAJE)
+    # -------------------------------------------------------------------------
     with tab1:
         st.subheader("Formulario de Solicitud (Pre-Viaje)")
         st.info("Este formulario genera una Cuenta por Cobrar (CxC) temporal al empleado hasta que legalice con facturas.")
         
-        # Usamos st.form para que la página no se recargue con cada tecla que presionas
         with st.form("form_anticipo", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
@@ -1919,19 +1920,141 @@ def app_viaticos():
                     with st.spinner("Registrando viaje en la base de datos central..."):
                         hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
                         
-                        # Generamos datos automáticos
-                        id_viaje = str(uuid.uuid4())[:8].upper() # ID corto único (ej: 4F9A2B1C)
+                        id_viaje = str(uuid.uuid4())[:8].upper() # ID único de 8 caracteres
                         fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        str_proyectos = " | ".join(proyectos)
+                        str_proyectos = " | ".join(proyectos) if proyectos else "Otro"
                         
-                        # Armamos la fila exacta como la definimos en tu Excel
                         nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo, acompanantes, str_proyectos, objetivo, monto, "Aprobado - Pendiente Legalizar"]
-                        
-                        # Escribimos en Google Sheets
                         hoja_anticipos.append_row(nueva_fila)
                         
                         st.success(f"✅ ¡Viaje registrado exitosamente! ID de Viaje: **{id_viaje}**")
                         st.balloons()
+
+    # -------------------------------------------------------------------------
+    # TAB 2: FASE 2 - LEGALIZACIÓN DE GASTOS (POST-VIAJE)
+    # -------------------------------------------------------------------------
+    with tab2:
+        st.subheader("🧾 Rendición de Cuentas y Cierre de Viaje")
+        st.markdown("Ingresa el ID del viaje generado en la Fase 1 para cargar el presupuesto asignado y relacionar los soportes.")
+        
+        id_buscar = st.text_input("🔑 Ingrese el ID del Viaje a Legalizar (8 caracteres):").strip().upper()
+        
+        if id_buscar:
+            hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
+            datos_anticipos = hoja_anticipos.get_all_records()
+            
+            # Buscador del viaje en la hoja de anticipos
+            viaje_encontrado = None
+            fila_index = None
+            for idx, row in enumerate(datos_anticipos):
+                if str(row.get("ID_Viaje")) == id_buscar:
+                    viaje_encontrado = row
+                    fila_index = idx + 2 # Ajuste de índice gspread (base 1 + fila de encabezado)
+                    break
+            
+            if not viaje_encontrado:
+                st.error("❌ No se encontró ningún viaje con ese ID. Por favor verifica el código.")
+            elif viaje_encontrado.get("Estado") == "Legalizado":
+                st.warning("⚠️ Este viaje ya fue legalizado previamente y se encuentra cerrado en contabilidad.")
+            else:
+                st.success(f"✅ Viaje Vinculado Exitosamente: **{viaje_encontrado.get('Objetivo')}**")
+                
+                # Resumen ejecutivo del viaje para control del usuario
+                v1, v2, v3 = st.columns(3)
+                v1.metric("Responsable del Dinero", viaje_encontrado.get("Conductor"))
+                anticipo_monto = float(viaje_encontrado.get("Monto_Solicitado", 0))
+                v2.metric("Anticipo Consignado", f"${anticipo_monto:,.0f} COP")
+                
+                proyectos_viaje = viaje_encontrado.get("Proyectos", "Otro").split(" | ")
+                v3.markdown("**Proyectos Asociados Autorizados:**")
+                for p in proyectos_viaje:
+                    v3.markdown(f"- `{p}`")
+                
+                st.markdown("---")
+                st.markdown("#### 📂 1. Matriz Digital de Gastos (Legalización Estilo Excel)")
+                st.markdown("Utiliza la tabla interactiva para agregar cada factura. Presiona **(+)** al final de la tabla para insertar filas.")
+                
+                # Modelo de datos base para la tabla dinámica
+                df_modelo = pd.DataFrame([{
+                    "Fecha Gasto": datetime.date.today(),
+                    "Categoría": "Alimentación",
+                    "Valor ($ COP)": 0,
+                    "Tipo Soporte": "Factura Electrónica",
+                    "Proyecto Imputado": proyectos_viaje[0] if proyectos_viaje else "Otro",
+                    "Comentarios / NIT Comercio": ""
+                }])
+                
+                # MOTOR EDITABLE DE STREAMLIT (Control Estricto de Columnas)
+                gastos_editados = st.data_editor(
+                    df_modelo,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        "Fecha Gasto": st.column_config.DateColumn("Fecha Gasto", required=True),
+                        "Categoría": st.column_config.SelectboxColumn("Categoría", options=["Alimentación", "Hospedaje", "Gasolina", "Peajes", "Materiales", "Otros"], required=True),
+                        "Valor ($ COP)": st.column_config.NumberColumn("Valor ($ COP)", min_value=0, step=1000, required=True),
+                        "Tipo Soporte": st.column_config.SelectboxColumn("Tipo Soporte (Filtro DIAN)", options=["Factura Electrónica", "RUT Comercio (Doc Soporte)", "Sin Soporte / Ticket POS"], required=True),
+                        "Proyecto Imputado": st.column_config.SelectboxColumn("Proyecto Imputado", options=proyectos_viaje + ["Otro"], required=True),
+                        "Comentarios / NIT Comercio": st.column_config.TextColumn("NIT o Descripción", max_chars=100, placeholder="Ej: NIT 900123456 o Almuerzo")
+                    }
+                )
+                
+                # --- MATRIZ DE CÁLCULO FINANCIERO Y FISCAL (EN VIVO) ---
+                df_gastos = pd.DataFrame(gastos_editados)
+                total_gastado = df_gastos["Valor ($ COP)"].sum() if not df_gastos.empty else 0
+                
+                # Filtros fiscales para el ojo del CFO
+                total_deducible = df_gastos[df_gastos["Tipo Soporte"].isin(["Factura Electrónica", "RUT Comercio (Doc Soporte)"])]["Valor ($ COP)"].sum() if not df_gastos.empty else 0
+                total_no_deducible = df_gastos[df_gastos["Tipo Soporte"] == "Sin Soporte / Ticket POS"]["Valor ($ COP)"].sum() if not df_gastos.empty else 0
+                
+                balance = anticipo_monto - total_gastado
+                
+                st.markdown("#### 📊 2. Balance Financiero y Liquidación de Caja")
+                c_c1, c_c2, c_c3, c_c4 = st.columns(4)
+                c_c1.metric("Total Gastado", f"${total_gastado:,.0f} COP")
+                c_c2.metric("Deducible (Impuestos ✅)", f"${total_deducible:,.0f} COP")
+                c_c3.metric("Gasto Rechazado (❌)", f"${total_no_deducible:,.0f} COP", 
+                           delta=f"{total_no_deducible:,.0f} a Nómina" if total_no_deducible > 0 else None, delta_color="inverse")
+                
+                if balance >= 0:
+                    c_c4.metric("Saldo a Reintegrar (Empleado)", f"${balance:,.0f} COP", delta="Sobra dinero", delta_color="normal")
+                else:
+                    c_c4.metric("Reembolsar a Empleado", f"${abs(balance):,.0f} COP", delta="Falta dinero", delta_color="inverse")
+                
+                # Alerta de Riesgo UGPP / DIAN Dinámica
+                if total_no_deducible > 0:
+                    st.warning(f"⚠️ **Alerta de Control Interno (CFO):** Se detectaron **${total_no_deducible:,.0f} COP** clasificados como 'Sin Soporte / Ticket POS'. Contabilidad no podrá deducir este gasto. Se sugiere aplicar descuento por nómina o exigir el Documento Soporte con RUT para mitigar riesgos salariales ante la UGPP.")
+                
+                st.markdown("---")
+                # Botón de Guardado Final
+                if st.button("💾 Finalizar y Registrar Legalización Contable"):
+                    if total_gastado == 0:
+                        st.error("⚠️ La matriz de gastos está vacía. Registra al menos un gasto antes de cerrar el viaje.")
+                    else:
+                        with st.spinner("Procesando transacciones en la nube de Google Sheets..."):
+                            hoja_legalizaciones = db_viaticos.worksheet("Legalizaciones")
+                            
+                            # 1. Empaquetamos todas las filas de la tabla editable para guardarlas en bloque
+                            filas_a_guardar = []
+                            for _, fila in df_gastos.iterrows():
+                                f_gasto = str(fila["Fecha Gasto"])
+                                cat = str(fila["Categoría"])
+                                val = float(fila["Valor ($ COP)"])
+                                sop = str(fila["Tipo Soporte"])
+                                proj = str(fila["Proyecto Imputado"])
+                                com = str(fila["Comentarios / NIT Comercio"])
+                                
+                                filas_a_guardar.append([id_buscar, f_gasto, cat, val, sop, proj, com])
+                            
+                            # Escritura masiva eficiente (ahorra cuota de la API)
+                            hoja_legalizaciones.append_rows(filas_a_guardar)
+                            
+                            # 2. Rompemos la Cuenta por Cobrar cambiando el estado del anticipo
+                            hoja_anticipos.update_cell(fila_index, 10, "Legalizado")
+                            
+                            st.success("🎉 ¡Viaje legalizado con éxito! El estado cambió a 'Legalizado' y los gastos se registraron de forma desagregada.")
+                            st.balloons()
+                            st.rerun()
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
