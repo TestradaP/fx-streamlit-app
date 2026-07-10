@@ -1966,8 +1966,8 @@ def main():
         "6. Endeudamiento y CAPEX", 
         "7. Simulador Estratégico CCC",
         "8. Lectura del Histórico",
-        "9. Laboratorio Quant (Avanzado)"
-        "10. Gestión de Viáticos y Legalizaciones"
+        "9. Laboratorio Quant (Avanzado)",
+        "10. Gestión de Viáticos y Legalizaciones",
     ))
     
     st.sidebar.markdown("---")
