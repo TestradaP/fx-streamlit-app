@@ -1952,7 +1952,7 @@ def app_viaticos():
                 v1.metric("Responsable", viaje_encontrado.get("Conductor"))
                 anticipo_monto = float(viaje_encontrado.get("Monto_Solicitado", 0))
                 v2.metric("Anticipo", f"${anticipo_monto:,.0f} COP")
-                proyectos_viaje = viaje_encontrado.get("Proyectos", "Otro").split(" | ")
+                proyectos_viaje = str(viaje_encontrado.get("Proyectos", "Otro")).split(" | ")
                 v3.markdown("**Proyectos Autorizados:**")
                 for p in proyectos_viaje: v3.markdown(f"- `{p}`")
                 
