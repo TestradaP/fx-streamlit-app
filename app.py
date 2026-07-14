@@ -2042,42 +2042,49 @@ def app_viaticos():
         hoja_legalizaciones = db_viaticos.worksheet("Legalizaciones")
         hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
         
-        df_leg_bi = pd.DataFrame(hoja_legalizaciones.get_all_records())
-        df_ant_bi = pd.DataFrame(hoja_anticipos.get_all_records())
+        datos_leg = hoja_legalizaciones.get_all_records()
+        datos_ant = hoja_anticipos.get_all_records()
         
-        if df_leg_bi.empty or df_ant_bi.empty:
+        if not datos_leg or not datos_ant:
             st.warning("📊 Aún no hay suficientes datos legalizados para generar métricas estadísticas.")
         else:
-            # Cruzamos los gastos con los anticipos para traer la información del vehículo usando el ID_Viaje
+            df_leg_bi = pd.DataFrame(datos_leg)
+            df_ant_bi = pd.DataFrame(datos_ant)
+            
+            # Cruzamos los gastos con los anticipos
             df_consolidado = pd.merge(df_leg_bi, df_ant_bi[['ID_Viaje', 'Vehiculo', 'Conductor']], on='ID_Viaje', how='left')
             
-            # NUEVO: Forzamos la conversión a números matemáticos para que la gráfica no se estrelle
+            # 🛡️ LIMPIEZA EXTREMA PARA MATPLOTLIB (El Escudo Protector)
             df_consolidado["Valor"] = pd.to_numeric(df_consolidado["Valor"], errors="coerce").fillna(0)
-            
-            # --- ANÁLISIS 1: COSTO TOTAL POR PROYECTO ---bi[['ID_Viaje', 'Vehiculo', 'Conductor']], on='ID_Viaje', how='left')
+            df_consolidado["Proyecto_Imputado"] = df_consolidado["Proyecto_Imputado"].fillna("Sin Proyecto").astype(str)
+            df_consolidado["Vehiculo"] = df_consolidado["Vehiculo"].fillna("Sin Vehículo").astype(str)
+            df_consolidado["Categoria"] = df_consolidado["Categoria"].fillna("Otra").astype(str)
             
             # --- ANÁLISIS 1: COSTO TOTAL POR PROYECTO ---
             st.markdown("### 🏗️ 1. Costo Total Acumulado por Proyecto")
             costo_proyecto = df_consolidado.groupby("Proyecto_Imputado")["Valor"].sum().reset_index()
-            costo_proyecto = costo_proyecto.sort_values(by="Valor", ascending=False)
+            # Filtramos para que solo intente graficar los que tienen un gasto mayor a cero
+            costo_proyecto = costo_proyecto[costo_proyecto["Valor"] > 0].sort_values(by="Valor", ascending=False)
             
-            fig_p, ax_p = plt.subplots(figsize=(10, 4))
-            bars = ax_p.barh(costo_proyecto["Proyecto_Imputado"], costo_proyecto["Valor"], color="#16a085")
-            ax_p.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x:,.0f}"))
-            ax_p.set_title("Inversión de Viáticos por Proyecto Contratado")
-            ax_p.spines['top'].set_visible(False); ax_p.spines['right'].set_visible(False)
-            # Etiquetas de valores en las barras
-            for bar in bars:
-                width = bar.get_width()
-                ax_p.text(width, bar.get_y() + bar.get_height()/2, f' ${width:,.0f}', va='center', ha='left', fontsize=9)
-            st.pyplot(fig_p)
+            if costo_proyecto.empty:
+                st.info("No hay gastos consolidados aún para graficar por proyecto.")
+            else:
+                fig_p, ax_p = plt.subplots(figsize=(10, 4))
+                bars = ax_p.barh(costo_proyecto["Proyecto_Imputado"], costo_proyecto["Valor"], color="#16a085")
+                ax_p.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x:,.0f}"))
+                ax_p.set_title("Inversión de Viáticos por Proyecto Contratado")
+                ax_p.spines['top'].set_visible(False); ax_p.spines['right'].set_visible(False)
+                for bar in bars:
+                    width = bar.get_width()
+                    ax_p.text(width, bar.get_y() + bar.get_height()/2, f' ${width:,.0f}', va='center', ha='left', fontsize=9)
+                st.pyplot(fig_p)
             
             # --- ANÁLISIS 2: GASOLINA Y CONTROL DE VEHÍCULOS ---
             st.markdown("---")
             st.markdown("### 🚗 2. Control de Flota (Consumo de Gasolina por Vehículo)")
             
-            # Filtramos estrictamente los gastos indexados en la categoría 'Gasolina'
-            df_gasolina = df_consolidado[df_consolidado["Categoria"] == "Gasolina"]
+            df_gasolina = df_consolidado[df_consolidado["Categoria"].str.contains("Gasolina", case=False, na=False)]
+            df_gasolina = df_gasolina[df_gasolina["Valor"] > 0]
             
             if df_gasolina.empty:
                 st.info("⛽ Aún no se han registrado facturas bajo la categoría de 'Gasolina'.")
@@ -2086,7 +2093,6 @@ def app_viaticos():
                 costo_gasolina_vehiculo = costo_gasolina_vehiculo.sort_values(by="Valor", ascending=False)
                 
                 col_bi1, col_bi2 = st.columns([1, 2])
-                
                 with col_bi1:
                     st.markdown("**Tabla de Consumo Acumulado:**")
                     st.dataframe(costo_gasolina_vehiculo.style.format({"Valor": "${:,.0f} COP"}), hide_index=True)
