@@ -1997,12 +1997,19 @@ def app_viaticos():
                 total_gastado = df_gastos["Valor ($ COP)"].sum() if not df_gastos.empty else 0
                 balance = anticipo_monto - total_gastado
                 
+                # ✅ Textos ultra claros para evitar confusiones contables
                 c_c1, c_c2 = st.columns(2)
-                c_c1.metric("Total Relacionado Hasta Ahora", f"${total_gastado:,.0f} COP")
-                if balance >= 0:
-                    c_c2.metric("Saldo a favor de la Empresa", f"${balance:,.0f} COP")
+                c_c1.metric("Total de Facturas Relacionadas", f"${total_gastado:,.0f} COP")
+                
+                if balance > 0:
+                    c_c2.metric("🟢 Empleado DEBE a la Empresa", f"${balance:,.0f} COP", 
+                               help="Sobra dinero. El empleado debe consignar esto de vuelta.")
+                elif balance < 0:
+                    c_c2.metric("🔴 Empresa DEBE al Empleado", f"${abs(balance):,.0f} COP", 
+                               help="Faltó dinero. La empresa debe pagarle esta diferencia.")
                 else:
-                    c_c2.metric("Saldo a Reembolsar al Empleado", f"${abs(balance):,.0f} COP")
+                    c_c2.metric("✅ Paz y Salvo", "$0 COP", 
+                               help="Gastó exactamente lo que se le dio.")
                 
                 # BOTÓN DE GUARDADO SIN CERRAR EL ID
                 if st.button("💾 Guardar Cambios y Actualizar Base de Datos"):
