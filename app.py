@@ -2051,6 +2051,11 @@ def app_viaticos():
             # Cruzamos los gastos con los anticipos para traer la información del vehículo usando el ID_Viaje
             df_consolidado = pd.merge(df_leg_bi, df_ant_bi[['ID_Viaje', 'Vehiculo', 'Conductor']], on='ID_Viaje', how='left')
             
+            # NUEVO: Forzamos la conversión a números matemáticos para que la gráfica no se estrelle
+            df_consolidado["Valor"] = pd.to_numeric(df_consolidado["Valor"], errors="coerce").fillna(0)
+            
+            # --- ANÁLISIS 1: COSTO TOTAL POR PROYECTO ---bi[['ID_Viaje', 'Vehiculo', 'Conductor']], on='ID_Viaje', how='left')
+            
             # --- ANÁLISIS 1: COSTO TOTAL POR PROYECTO ---
             st.markdown("### 🏗️ 1. Costo Total Acumulado por Proyecto")
             costo_proyecto = df_consolidado.groupby("Proyecto_Imputado")["Valor"].sum().reset_index()
