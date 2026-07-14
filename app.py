@@ -1894,7 +1894,8 @@ def app_viaticos():
         with st.form("form_anticipo", clear_on_submit=True):
             col1, col2 = st.columns(2)
             solicitante = col1.text_input("Nombre del Solicitante / Coordinador")
-            conductor = col2.text_input("Nombre del Conductor / Instalador Principal")
+            # Reemplaza la línea del conductor por esta:
+            conductor = col2.text_input("Conductor (Código y Nombre)", help="Ej: 1020 - Juan Pérez")
             
             # NUEVO: Texto libre para Vehículos
             vehiculo = col1.text_input("Vehículo Asignado (Placa / Medio)", help="Ej: JME-123, Furgon, Particular")
@@ -2111,6 +2112,34 @@ def app_viaticos():
                              colors=["#e74c3c", "#34495e", "#f1c40f", "#3498db"])
                     ax_v.set_title("Distribución del Gasto de Combustible")
                     st.pyplot(fig_v)
+    # --- ANÁLISIS 3: LIQUIDACIÓN TOTAL POR TRABAJADOR ---
+            st.markdown("---")
+            st.markdown("### 👷‍♂️ 3. Liquidación Total por Trabajador (Conductor)")
+            
+            # Limpiamos los datos del conductor por si hay celdas vacías
+            df_consolidado["Conductor"] = df_consolidado["Conductor"].fillna("Sin Conductor").astype(str)
+            
+            # Agrupamos todo el dinero gastado por cada conductor
+            costo_trabajador = df_consolidado.groupby("Conductor")["Valor"].sum().reset_index()
+            costo_trabajador = costo_trabajador[costo_trabajador["Valor"] > 0].sort_values(by="Valor", ascending=False)
+            
+            if costo_trabajador.empty:
+                st.info("No hay gastos consolidados aún para graficar por trabajador.")
+            else:
+                col_t1, col_t2 = st.columns([1, 2])
+                with col_t1:
+                    st.markdown("**Tabla Acumulada por Empleado:**")
+                    st.dataframe(costo_trabajador.style.format({"Valor": "${:,.0f} COP"}), hide_index=True)
+                
+                with col_t2:
+                    fig_t, ax_t = plt.subplots(figsize=(8, 4))
+                    # Usamos un color distinto (morado) para diferenciar a los empleados de los proyectos
+                    bars_t = ax_t.bar(costo_trabajador["Conductor"], costo_trabajador["Valor"], color="#8e44ad")
+                    ax_t.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x:,.0f}"))
+                    ax_t.set_title("Total Legalizado por Empleado")
+                    ax_t.spines['top'].set_visible(False); ax_t.spines['right'].set_visible(False)
+                    plt.xticks(rotation=45, ha='right') # Inclinamos los nombres para que se lean bien
+                    st.pyplot(fig_t)
 
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
