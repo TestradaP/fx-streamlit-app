@@ -2112,33 +2112,53 @@ def app_viaticos():
                              colors=["#e74c3c", "#34495e", "#f1c40f", "#3498db"])
                     ax_v.set_title("Distribución del Gasto de Combustible")
                     st.pyplot(fig_v)
-    # --- ANÁLISIS 3: LIQUIDACIÓN TOTAL POR TRABAJADOR ---
+    # --- ANÁLISIS 3: ESTADO DE CUENTA GLOBAL POR TRABAJADOR ---
             st.markdown("---")
-            st.markdown("### 👷‍♂️ 3. Liquidación Total por Trabajador (Conductor)")
+            st.markdown("### 👷‍♂️ 3. Estado de Cuenta Global por Trabajador")
+            st.info("Cruza **todos los anticipos** contra **todas las legalizaciones** de cada empleado para darte el saldo consolidado.")
             
-            # Limpiamos los datos del conductor por si hay celdas vacías
+            # 1. Total Consignado (Anticipos)
+            df_ant_bi["Conductor"] = df_ant_bi["Conductor"].fillna("Sin Conductor").astype(str)
+            df_ant_bi["Monto_Solicitado"] = pd.to_numeric(df_ant_bi["Monto_Solicitado"], errors="coerce").fillna(0)
+            consignado_trabajador = df_ant_bi.groupby("Conductor")["Monto_Solicitado"].sum().reset_index()
+            consignado_trabajador.rename(columns={"Monto_Solicitado": "Total Consignado"}, inplace=True)
+            
+            # 2. Total Liquidado (Gastos comprobados)
             df_consolidado["Conductor"] = df_consolidado["Conductor"].fillna("Sin Conductor").astype(str)
+            liquidado_trabajador = df_consolidado.groupby("Conductor")["Valor"].sum().reset_index()
+            liquidado_trabajador.rename(columns={"Valor": "Total Liquidado"}, inplace=True)
             
-            # Agrupamos todo el dinero gastado por cada conductor
-            costo_trabajador = df_consolidado.groupby("Conductor")["Valor"].sum().reset_index()
-            costo_trabajador = costo_trabajador[costo_trabajador["Valor"] > 0].sort_values(by="Valor", ascending=False)
+            # 3. Cruzar tablas
+            estado_cuenta = pd.merge(consignado_trabajador, liquidado_trabajador, on="Conductor", how="outer").fillna(0)
             
-            if costo_trabajador.empty:
-                st.info("No hay gastos consolidados aún para graficar por trabajador.")
+            # 4. Calcular Saldo Global
+            estado_cuenta["Saldo Pendiente"] = estado_cuenta["Total Consignado"] - estado_cuenta["Total Liquidado"]
+            estado_cuenta = estado_cuenta.sort_values(by="Total Liquidado", ascending=False)
+            
+            if estado_cuenta.empty:
+                st.info("No hay datos suficientes para generar el estado de cuenta por trabajador.")
             else:
-                col_t1, col_t2 = st.columns([1, 2])
+                col_t1, col_t2 = st.columns([1.5, 1])
                 with col_t1:
-                    st.markdown("**Tabla Acumulada por Empleado:**")
-                    st.dataframe(costo_trabajador.style.format({"Valor": "${:,.0f} COP"}), hide_index=True)
+                    st.markdown("**Tabla de Estado de Cuenta Acumulado:**")
+                    st.caption("🟢 **Saldo Positivo:** Sobró dinero (El empleado debe devolver a la empresa).  \n🔴 **Saldo Negativo:** Faltó dinero (La empresa debe reembolsar al empleado).")
+                    st.dataframe(
+                        estado_cuenta.style.format({
+                            "Total Consignado": "${:,.0f}", 
+                            "Total Liquidado": "${:,.0f}", 
+                            "Saldo Pendiente": "${:,.0f}"
+                        }), 
+                        hide_index=True,
+                        use_container_width=True
+                    )
                 
                 with col_t2:
-                    fig_t, ax_t = plt.subplots(figsize=(8, 4))
-                    # Usamos un color distinto (morado) para diferenciar a los empleados de los proyectos
-                    bars_t = ax_t.bar(costo_trabajador["Conductor"], costo_trabajador["Valor"], color="#8e44ad")
+                    fig_t, ax_t = plt.subplots(figsize=(6, 4))
+                    bars_t = ax_t.bar(estado_cuenta["Conductor"], estado_cuenta["Total Liquidado"], color="#8e44ad")
                     ax_t.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x:,.0f}"))
-                    ax_t.set_title("Total Legalizado por Empleado")
+                    ax_t.set_title("Volumen de Gasto (Liquidado)")
                     ax_t.spines['top'].set_visible(False); ax_t.spines['right'].set_visible(False)
-                    plt.xticks(rotation=45, ha='right') # Inclinamos los nombres para que se lean bien
+                    plt.xticks(rotation=45, ha='right')
                     st.pyplot(fig_t)
 
 # =========================
