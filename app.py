@@ -1895,23 +1895,34 @@ def app_viaticos():
             col1, col2 = st.columns(2)
             solicitante = col1.text_input("Nombre del Solicitante / Coordinador")
             conductor = col2.text_input("Nombre del Conductor / Instalador Principal")
-            vehiculo = col1.selectbox("Vehículo Asignado (Placa)", ["Seleccionar...", "JME-123 (Camioneta)", "JME-456 (Furgón)", "Vehículo Particular", "Transporte Público"])
+            
+            # NUEVO: Texto libre para Vehículos
+            vehiculo = col1.text_input("Vehículo Asignado (Placa / Medio)", help="Ej: JME-123, Furgon, Particular")
             acompanantes = col2.text_area("Acompañantes (Separados por coma)")
-            proyectos = st.multiselect("Proyecto(s) a visitar", ["Proyecto Alfa", "Proyecto Beta", "Mantenimiento Gamma", "Garantía Delta", "Otro"])
+            
+            # NUEVO: Texto libre para Proyectos
+            proyectos_str = st.text_input("Proyecto(s) a visitar", help="Si son varios, sepáralos por coma (Ej: Torre Alfa, Proyecto Beta)")
+            
             objetivo = st.text_input("Objetivo Principal de la Visita")
             monto = st.number_input("Presupuesto Solicitado ($ COP)", min_value=0, value=0, step=50000)
             
             submitted = st.form_submit_button("🚀 Enviar Solicitud de Anticipo")
             if submitted:
-                if solicitante == "" or conductor == "" or monto == 0 or vehiculo == "Seleccionar...":
-                    st.error("⚠️ Por favor, llena todos los campos clave.")
+                # Estandarizamos el vehículo a MAYÚSCULAS para no dañar el Dashboard BI
+                vehiculo_limpio = vehiculo.strip().upper() 
+                
+                if solicitante == "" or conductor == "" or monto == 0 or vehiculo_limpio == "":
+                    st.error("⚠️ Por favor, llena todos los campos clave (Nombres, Vehículo y Monto).")
                 else:
                     hoja_anticipos = db_viaticos.worksheet("Solicitudes_Anticipos")
                     id_viaje = str(uuid.uuid4())[:8].upper()
                     fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    str_proyectos = " | ".join(proyectos) if proyectos else "Otro"
                     
-                    nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo, acompanantes, str_proyectos, objetivo, monto, "Abierto - En Proceso"]
+                    # Convertimos el texto ingresado al formato estricto de la base de datos (" | ")
+                    proyectos_lista = [p.strip() for p in proyectos_str.split(",") if p.strip()]
+                    str_proyectos = " | ".join(proyectos_lista) if proyectos_lista else "Otro"
+                    
+                    nueva_fila = [id_viaje, fecha_hoy, solicitante, conductor, vehiculo_limpio, acompanantes, str_proyectos, objetivo, monto, "Abierto - En Proceso"]
                     hoja_anticipos.append_row(nueva_fila)
                     st.success(f"✅ ¡Viaje registrado! ID de Viaje: **{id_viaje}**")
                     st.balloons()
