@@ -31,6 +31,24 @@ class AsOfJoinTests(unittest.TestCase):
 
         self.assertEqual(adjusted.loc[0, "observation_date"], pd.Timestamp("2026-07-13"))
 
+    def test_authoritative_release_timestamp_replaces_configured_lag(self):
+        frame = pd.DataFrame(
+            {
+                "observation_date": ["2026-06-01"],
+                "value": [1.0],
+                "release_timestamp": ["2026-07-15T12:00:00Z"],
+                "release_timestamp_is_authoritative": [True],
+            }
+        )
+
+        adjusted = apply_availability_lag(frame, lag_days=30)
+
+        self.assertEqual(adjusted.loc[0, "observation_date"], pd.Timestamp("2026-07-15"))
+        self.assertEqual(
+            adjusted.loc[0, "availability_timestamp_source"],
+            "provider_release_timestamp",
+        )
+
     def test_repository_retains_revisions_and_loads_as_of_snapshot(self):
         with TemporaryDirectory() as temporary:
             repository = SeriesRepository(temporary)
@@ -62,6 +80,30 @@ class AsOfJoinTests(unittest.TestCase):
             self.assertEqual(old_view["value"].iloc[0], 100.0)
             self.assertEqual(new_view["value"].iloc[0], 110.0)
             self.assertEqual(len(repository.load_vintages("test", "macro")), 2)
+
+    def test_first_seen_view_prefers_provider_initial_release_value(self):
+        with TemporaryDirectory() as temporary:
+            repository = SeriesRepository(temporary)
+            revised_download = pd.DataFrame(
+                {
+                    "observation_date": ["2025-01-01"],
+                    "value": [110.0],
+                    "initial_release_value": [100.0],
+                    "release_timestamp": ["2025-02-01T00:00:00Z"],
+                    "release_timestamp_is_authoritative": [True],
+                    "release_timestamp_source": ["alfred_initial_release"],
+                    "retrieved_at": ["2026-07-15T12:00:00Z"],
+                }
+            )
+            repository.save_series(revised_download, "fred", "macro")
+
+            point_in_time = repository.load_first_seen_series("fred", "macro")
+
+            self.assertEqual(point_in_time["value"].iloc[0], 100.0)
+            self.assertEqual(
+                pd.Timestamp(point_in_time["release_timestamp"].iloc[0]).date().isoformat(),
+                "2025-02-01",
+            )
 
 
 if __name__ == "__main__":

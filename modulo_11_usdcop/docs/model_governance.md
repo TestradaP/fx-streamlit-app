@@ -27,11 +27,14 @@ El champion solo cambia cuando el challenger supera los benchmarks en varias ven
 
 La implementación evalúa ElasticNet, Ridge, Huber, gradient boosting, PCA-Ridge,
 Extra Trees, boosting cuantílico, Ridge por régimen VIX y ensambles igualitario y
-ponderado por error OOS histórico. Cada horizonte se decide por separado. La promoción automática exige
+ponderado por error OOS histórico, stacking positivo regularizado, Ridge de historia
+larga y Extra Trees de ventana reciente. Cada horizonte se decide por separado. La promoción automática exige
 skill mínimo, dirección, mayoría de ventanas positivas y límite superior negativo
 del intervalo block-bootstrap de la diferencia de error. Además debe mejorar en
 una muestra final sellada que no interviene en la selección inicial. Si no se
-cumplen todas las reglas, el registro selecciona `random_walk` como fallback.
+cumplen todas las reglas, el registro selecciona `random_walk` como fallback. Los
+p-valores se ajustan con Holm para controlar la búsqueda entre múltiples challengers;
+los modelos ajustados usan pipelines completos dentro de CV temporal purgada.
 
 ## Politica de salida
 

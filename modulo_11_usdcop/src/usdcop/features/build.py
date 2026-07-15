@@ -7,12 +7,35 @@ import pandas as pd
 
 
 def apply_availability_lag(frame: pd.DataFrame, lag_days: int = 0) -> pd.DataFrame:
-    """Move observations to the first business day when they are assumed available."""
+    """Move observations to their first knowable business date.
+
+    Authoritative release timestamps (for example ALFRED initial releases) take
+    precedence.  Configured lags remain the conservative fallback for sources
+    that expose only an observation date.
+    """
     adjusted = frame.copy()
-    dates = pd.to_datetime(adjusted["observation_date"]) + pd.to_timedelta(
-        int(lag_days), unit="D"
+    observation_dates = pd.to_datetime(adjusted["observation_date"])
+    fallback_dates = observation_dates + pd.to_timedelta(int(lag_days), unit="D")
+    release_values = adjusted.get(
+        "release_timestamp", pd.Series(pd.NaT, index=adjusted.index)
     )
-    adjusted["observation_date"] = dates + pd.offsets.BDay(0)
+    release_dates = pd.to_datetime(
+        release_values, errors="coerce", utc=True
+    ).dt.tz_localize(None)
+    authoritative = adjusted.get(
+        "release_timestamp_is_authoritative",
+        pd.Series(False, index=adjusted.index),
+    ).fillna(False).astype(bool)
+    dates = fallback_dates.where(~authoritative | release_dates.isna(), release_dates)
+    dates = pd.concat([dates.rename("available"), observation_dates.rename("observed")], axis=1).max(
+        axis=1
+    )
+    adjusted["observation_date"] = pd.to_datetime(dates).dt.normalize() + pd.offsets.BDay(0)
+    adjusted["availability_timestamp_source"] = np.where(
+        authoritative & release_dates.notna(),
+        "provider_release_timestamp",
+        "configured_lag",
+    )
     return adjusted
 
 

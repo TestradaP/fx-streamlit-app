@@ -82,6 +82,8 @@ class BanRepClient:
         # Where an official release timestamp is unavailable from the endpoint,
         # default to the observation date and flag this in metadata downstream.
         frame["release_timestamp"] = frame["observation_date"]
+        frame["release_timestamp_is_authoritative"] = False
+        frame["release_timestamp_source"] = "configured_availability_lag"
         return frame[
             [
                 "series_id",
@@ -90,6 +92,8 @@ class BanRepClient:
                 "release_timestamp",
                 "retrieved_at",
                 "source",
+                "release_timestamp_is_authoritative",
+                "release_timestamp_source",
             ]
         ]
 

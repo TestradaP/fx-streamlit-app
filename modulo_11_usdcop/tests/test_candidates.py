@@ -7,8 +7,11 @@ from usdcop.features.build import engineer_market_features
 from usdcop.models.candidates import CANDIDATE_NAMES, DirectCandidateForecaster
 from usdcop.pipeline.backtest import (
     _block_bootstrap_loss_difference,
+    _conformal_quantile_adjustment,
     _conformal_radius,
     _historical_ensemble_weights,
+    _holm_adjust,
+    _regularized_stacking_weights,
 )
 from usdcop.pipeline.forecast import _feature_drift
 
@@ -52,6 +55,8 @@ class CandidateModelTests(unittest.TestCase):
         self.assertEqual(set(model.models), set(CANDIDATE_NAMES))
         self.assertEqual(predicted.shape[1], len(CANDIDATE_NAMES))
         self.assertTrue(np.isfinite(predicted.to_numpy()).all())
+        self.assertGreater(model.models["elastic_net"][15].cv.gap, 0)
+        self.assertGreater(model.models["pca_ridge"][15].cv.gap, 0)
         quantiles = model.predict_quantiles(X.iloc[[-1]])
         self.assertLessEqual(
             quantiles["pred_log_return_p10_15d"].iloc[0],
@@ -109,6 +114,31 @@ class CandidateModelTests(unittest.TestCase):
 
         self.assertAlmostEqual(sum(weights.values()), 1.0)
         self.assertEqual(max(weights, key=weights.get), CANDIDATE_NAMES[0])
+
+    def test_regularized_stacking_is_positive_and_normalized(self):
+        index = pd.date_range("2023-01-01", periods=120, freq="B")
+        actual = np.sin(np.linspace(0, 8, len(index))) * 0.02
+        predictions = pd.DataFrame(
+            {"spot": 4000.0, "actual_15d": actual}, index=index
+        )
+        for position, name in enumerate(CANDIDATE_NAMES):
+            predictions[f"{name}_15d"] = actual + position * 0.001
+
+        weights = _regularized_stacking_weights(predictions, 15)
+
+        self.assertAlmostEqual(sum(weights.values()), 1.0)
+        self.assertTrue(all(value >= 0 for value in weights.values()))
+
+    def test_holm_adjustment_and_conformal_quantiles(self):
+        adjusted = _holm_adjust({"a": 0.01, "b": 0.03, "c": 0.20})
+        self.assertGreaterEqual(adjusted["a"], 0.01)
+        self.assertGreaterEqual(adjusted["b"], adjusted["a"])
+
+        actual = pd.Series(np.linspace(-0.05, 0.05, 100))
+        low = actual - 0.01
+        high = actual + 0.01
+        adjustment = _conformal_quantile_adjustment(actual, low, high)
+        self.assertGreaterEqual(adjustment, 0.0)
 
     def test_feature_drift_flags_extreme_values(self):
         latest = pd.DataFrame([{"feature": 10.0}])

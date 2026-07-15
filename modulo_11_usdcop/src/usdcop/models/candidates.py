@@ -9,8 +9,8 @@ from sklearn.decomposition import PCA
 from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
 from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import ElasticNetCV, HuberRegressor, RidgeCV
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.linear_model import ElasticNet, HuberRegressor, Ridge
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
@@ -24,33 +24,58 @@ CANDIDATE_NAMES = (
     "extra_trees",
     "quantile_boosting",
     "regime_ridge",
+    "long_ridge",
+    "recent_extra_trees",
 )
 
 
-def _ridge_pipeline(feature_count: int, splits: int = 5) -> Pipeline:
-    return Pipeline(
+def _purged_search(
+    pipeline: Pipeline,
+    param_grid: dict[str, list[float]],
+    *,
+    purge_rows: int,
+    splits: int = 4,
+) -> GridSearchCV:
+    return GridSearchCV(
+        pipeline,
+        param_grid,
+        scoring="neg_mean_absolute_error",
+        cv=TimeSeriesSplit(n_splits=splits, gap=max(1, int(purge_rows))),
+        refit=True,
+        n_jobs=1,
+        error_score="raise",
+    )
+
+
+def _ridge_search(
+    feature_count: int,
+    *,
+    purge_rows: int,
+    splits: int = 4,
+) -> GridSearchCV:
+    pipeline = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
             ("scale", StandardScaler()),
             ("select", SelectKBest(f_regression, k=min(40, feature_count))),
-            (
-                "model",
-                RidgeCV(
-                    alphas=np.logspace(-3, 3, 25),
-                    cv=TimeSeriesSplit(n_splits=splits),
-                    scoring="neg_mean_absolute_error",
-                ),
-            ),
+            ("model", Ridge()),
         ]
+    )
+    return _purged_search(
+        pipeline,
+        {"model__alpha": list(np.logspace(-3, 3, 9))},
+        purge_rows=purge_rows,
+        splits=splits,
     )
 
 
 @dataclass
 class RegimeRidgeRegressor:
     feature_count: int
+    purge_rows: int
     minimum_regime_rows: int = 250
-    global_model: Pipeline | None = None
-    regime_models: dict[str, Pipeline] = field(default_factory=dict)
+    global_model: GridSearchCV | None = None
+    regime_models: dict[str, GridSearchCV] = field(default_factory=dict)
 
     @staticmethod
     def _regimes(X: pd.DataFrame) -> pd.Series:
@@ -66,13 +91,17 @@ class RegimeRidgeRegressor:
         ).astype("string")
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "RegimeRidgeRegressor":
-        self.global_model = _ridge_pipeline(self.feature_count).fit(X, y)
+        self.global_model = _ridge_search(
+            self.feature_count, purge_rows=self.purge_rows
+        ).fit(X, y)
         regimes = self._regimes(X)
         for regime in ("calm", "normal", "stress"):
             selected = regimes.eq(regime)
             if int(selected.sum()) >= self.minimum_regime_rows:
-                self.regime_models[regime] = _ridge_pipeline(
-                    self.feature_count, splits=4
+                self.regime_models[regime] = _ridge_search(
+                    self.feature_count,
+                    purge_rows=min(self.purge_rows, 10),
+                    splits=3,
                 ).fit(X.loc[selected], y.loc[selected])
         return self
 
@@ -89,9 +118,73 @@ class RegimeRidgeRegressor:
 
 
 @dataclass
+class LongHistoryRidgeRegressor:
+    purge_rows: int
+    minimum_coverage: float = 0.80
+    selected_features: list[str] = field(default_factory=list)
+    model: GridSearchCV | None = None
+
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "LongHistoryRidgeRegressor":
+        early_cutoff = max(1, int(len(X) * 0.20))
+        self.selected_features = [
+            column
+            for column in X.columns
+            if float(X[column].notna().mean()) >= self.minimum_coverage
+            and X[column].iloc[:early_cutoff].notna().any()
+        ]
+        if len(self.selected_features) < 5:
+            self.selected_features = list(X.columns)
+        self.model = _ridge_search(
+            len(self.selected_features), purge_rows=self.purge_rows
+        ).fit(X[self.selected_features], y)
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Long-history model has not been fitted")
+        return self.model.predict(X[self.selected_features])
+
+
+@dataclass
+class RecentExtraTreesRegressor:
+    random_state: int
+    recent_rows: int = 1500
+    feature_count: int = 40
+    model: Pipeline | None = None
+
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "RecentExtraTreesRegressor":
+        recent_index = X.index[-min(self.recent_rows, len(X)) :]
+        selected = min(self.feature_count, X.shape[1])
+        self.model = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("select", SelectKBest(f_regression, k=selected)),
+                (
+                    "model",
+                    ExtraTreesRegressor(
+                        n_estimators=200,
+                        max_depth=8,
+                        min_samples_leaf=12,
+                        max_features=0.7,
+                        n_jobs=-1,
+                        random_state=self.random_state,
+                    ),
+                ),
+            ]
+        ).fit(X.loc[recent_index], y.loc[recent_index])
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Recent-window model has not been fitted")
+        return self.model.predict(X)
+
+
+@dataclass
 class DirectCandidateForecaster:
     horizons: tuple[int, ...]
     random_state: int = 20260715
+    recent_window_rows: int = 1500
     models: dict[str, dict[int, Any]] = field(default_factory=dict)
     feature_names: list[str] = field(default_factory=list)
     quantile_models: dict[int, dict[float, Pipeline]] = field(default_factory=dict)
@@ -118,27 +211,26 @@ class DirectCandidateForecaster:
             ]
         )
 
-    def _pipelines(self, feature_count: int) -> dict[str, Pipeline]:
+    def _pipelines(self, feature_count: int, horizon: int) -> dict[str, Any]:
         selected = min(40, feature_count)
-        time_cv = TimeSeriesSplit(n_splits=5)
+        purge_rows = max(1, int(np.ceil(horizon * 5 / 7)))
+        elastic_pipeline = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scale", StandardScaler()),
+                ("model", ElasticNet(max_iter=50000, random_state=self.random_state)),
+            ]
+        )
         return {
-            "elastic_net": Pipeline(
-                [
-                    ("imputer", SimpleImputer(strategy="median")),
-                    ("scale", StandardScaler()),
-                    (
-                        "model",
-                        ElasticNetCV(
-                            l1_ratio=[0.05, 0.15, 0.35, 0.65, 0.9],
-                            alphas=np.logspace(-4, -1, 25),
-                            cv=time_cv,
-                            max_iter=50000,
-                            random_state=self.random_state,
-                        ),
-                    ),
-                ]
+            "elastic_net": _purged_search(
+                elastic_pipeline,
+                {
+                    "model__alpha": list(np.logspace(-4, -1, 4)),
+                    "model__l1_ratio": [0.10, 0.50, 0.90],
+                },
+                purge_rows=purge_rows,
             ),
-            "ridge": _ridge_pipeline(feature_count),
+            "ridge": _ridge_search(feature_count, purge_rows=purge_rows),
             "huber": Pipeline(
                 [
                     ("imputer", SimpleImputer(strategy="median")),
@@ -180,11 +272,7 @@ class DirectCandidateForecaster:
                     ("pca", PCA(n_components=0.95, svd_solver="full")),
                     (
                         "model",
-                        RidgeCV(
-                            alphas=np.logspace(-3, 3, 25),
-                            cv=TimeSeriesSplit(n_splits=5),
-                            scoring="neg_mean_absolute_error",
-                        ),
+                        Ridge(),
                     ),
                 ]
             ),
@@ -221,8 +309,25 @@ class DirectCandidateForecaster:
                 raise ValueError(f"Insufficient rows for {target_column}: {valid.sum()}")
             horizon_X = X.loc[valid, self.feature_names]
             horizon_y = targets.loc[valid, target_column]
-            pipelines: dict[str, Any] = self._pipelines(len(self.feature_names))
-            pipelines["regime_ridge"] = RegimeRidgeRegressor(len(self.feature_names))
+            purge_rows = max(1, int(np.ceil(horizon * 5 / 7)))
+            pipelines: dict[str, Any] = self._pipelines(
+                len(self.feature_names), horizon
+            )
+            pipelines["pca_ridge"] = _purged_search(
+                pipelines["pca_ridge"],
+                {"model__alpha": list(np.logspace(-3, 3, 9))},
+                purge_rows=purge_rows,
+            )
+            pipelines["regime_ridge"] = RegimeRidgeRegressor(
+                len(self.feature_names), purge_rows=purge_rows
+            )
+            pipelines["long_ridge"] = LongHistoryRidgeRegressor(
+                purge_rows=purge_rows
+            )
+            pipelines["recent_extra_trees"] = RecentExtraTreesRegressor(
+                random_state=self.random_state,
+                recent_rows=self.recent_window_rows,
+            )
             for name, pipeline in pipelines.items():
                 pipeline.fit(horizon_X, horizon_y)
                 self.models[name][horizon] = pipeline

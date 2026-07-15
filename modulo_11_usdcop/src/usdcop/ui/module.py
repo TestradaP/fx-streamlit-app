@@ -404,6 +404,8 @@ def render_module(project_root: str | Path | None = None) -> None:
                     "confirmation_directional_accuracy",
                     "quantile_interval_coverage",
                     "probabilistic_calibration_passed",
+                    "holm_adjusted_pvalue",
+                    "conformal_quantile_coverage",
                 )
                 if column in model_metrics
             )
@@ -443,6 +445,12 @@ def render_module(project_root: str | Path | None = None) -> None:
                         "Cobertura cuantílica", format="%.1%%"
                     ),
                     "probabilistic_calibration_passed": "Calibración probabilística",
+                    "holm_adjusted_pvalue": st.column_config.NumberColumn(
+                        "p ajustado Holm", format="%.4f"
+                    ),
+                    "conformal_quantile_coverage": st.column_config.NumberColumn(
+                        "Cobertura CQR", format="%.1%%"
+                    ),
                 },
             )
             comparison = px.line(
@@ -460,9 +468,10 @@ def render_module(project_root: str | Path | None = None) -> None:
             )
             st.plotly_chart(comparison, width="stretch")
             st.caption(
-                "Diseño: ventana expansiva purgada, bloques de 63 observaciones, 750 fechas "
+                "Diseño: ventana expansiva purgada, bloques de 125 observaciones, 750 fechas "
                 "fuera de muestra y 20% final sellado para confirmación. La selección de "
-                "hiperparámetros usa TimeSeriesSplit."
+                "hiperparámetros usa pipelines anidados con TimeSeriesSplit y embargo; la "
+                "promoción corrige comparaciones múltiples mediante Holm."
             )
             if validation and validation.get("academic_blockers"):
                 st.markdown("#### Pendientes para uso académico confirmatorio")

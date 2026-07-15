@@ -96,16 +96,21 @@ días y selección temporal de hiperparámetros. Las series mensuales, trimestra
 FRED reciben rezagos conservadores de disponibilidad; aun así, para investigación
 académica definitiva se requiere acumular cobertura histórica point-in-time. Cada
 descarga conserva únicamente observaciones nuevas o revisadas como snapshots
-inmutables, sin afirmar que revisiones anteriores puedan reconstruirse.
+inmutables, sin afirmar que revisiones anteriores puedan reconstruirse. Para FRED,
+el pipeline consulta ALFRED `output_type=4` y usa tanto la fecha como el valor de
+la publicación inicial en el backtest;
+para fuentes que no la exponen, conserva el rezago documentado en el catálogo.
 
 Los challengers incluidos son ElasticNet, Ridge, Huber, gradient boosting,
 PCA-Ridge, Extra Trees, gradient boosting cuantílico y Ridge por régimen VIX,
-además de ensambles igualitario y ponderado por error OOS pasado. La selección usa
-750 observaciones fuera de muestra, bloques expansivos purgados de 63 fechas,
+un Ridge de historia larga y Extra Trees sobre una ventana reciente, además de
+ensambles igualitario, ponderado y stacking positivo regularizado. La selección usa
+750 observaciones fuera de muestra, bloques expansivos purgados de 125 fechas,
 ventanas de estabilidad y una muestra final sellada de 20%. Exige además un
-intervalo block-bootstrap favorable. Si ninguno cumple, vuelve automáticamente a
+intervalo block-bootstrap favorable, una prueba DM con corrección de Holm y
+validación anidada de pipelines con embargo temporal. Si ninguno cumple, vuelve automáticamente a
 spot sin cambio. Los intervalos P10-P90 se calibran con residuos OOS o con los
-cuantiles del modelo cuando este resulta seleccionado.
+cuantiles conformalizados del modelo cuando este resulta seleccionado.
 
 El workflow actualiza, reentrena, puntúa y valida dos veces por día hábil. Esto
 mantiene sincronizados el registro champion y el artefacto serializado.

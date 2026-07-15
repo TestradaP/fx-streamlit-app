@@ -23,14 +23,32 @@ from usdcop.models.trainer import make_direct_targets
 LOGGER = logging.getLogger(__name__)
 
 
-def load_named_series(repository: SeriesRepository, series_catalog: dict) -> dict[str, pd.DataFrame]:
+def load_named_series(
+    repository: SeriesRepository,
+    series_catalog: dict,
+    *,
+    vintage_policy: str = "latest",
+) -> dict[str, pd.DataFrame]:
+    if vintage_policy not in {"latest", "first_seen"}:
+        raise ValueError(f"Unknown vintage policy: {vintage_policy}")
     frames: dict[str, pd.DataFrame] = {}
     for source in ("banrep", "fred"):
         for item in series_catalog.get(source, []):
             if not item.get("enabled"):
                 continue
             try:
-                frame = repository.load_series(source, item["name"])
+                if vintage_policy == "first_seen":
+                    try:
+                        frame = repository.load_first_seen_series(source, item["name"])
+                    except FileNotFoundError:
+                        LOGGER.warning(
+                            "No vintage archive for %s:%s; using latest stored history",
+                            source,
+                            item["name"],
+                        )
+                        frame = repository.load_series(source, item["name"])
+                else:
+                    frame = repository.load_series(source, item["name"])
                 frames[item["name"]] = apply_availability_lag(
                     frame, int(item.get("availability_lag_days", 0))
                 )
@@ -74,6 +92,7 @@ def train_models(project_root: str | Path | None = None) -> dict:
     model = DirectCandidateForecaster(
         tuple(settings["horizons_calendar_days"]),
         random_state=int(settings["model"].get("random_seed", 20260715)),
+        recent_window_rows=int(settings["model"].get("recent_window_rows", 1500)),
     )
     model.fit(dataset[feature_columns], targets)
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -109,7 +128,8 @@ def train_models(project_root: str | Path | None = None) -> dict:
         "horizons": settings["horizons_calendar_days"],
         "candidate_models": list(CANDIDATE_NAMES),
         "sklearn_version": sklearn.__version__,
-        "validation_cv": "TimeSeriesSplit(n_splits=5)",
+        "validation_cv": "nested purged time-series search",
+        "training_vintage_policy": "latest_available",
         "availability_lags_applied": True,
         "status": "TRAINED_NOT_YET_GOVERNANCE_APPROVED",
     }

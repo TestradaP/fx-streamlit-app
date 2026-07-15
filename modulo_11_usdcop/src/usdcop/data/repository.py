@@ -108,14 +108,38 @@ class SeriesRepository:
             previous_latest = (
                 previous.sort_values("retrieved_at")
                 .drop_duplicates("observation_date", keep="last")
-                .set_index("observation_date")["value"]
+                .set_index("observation_date")
             )
             incoming["_previous_value"] = incoming["observation_date"].map(
-                previous_latest
+                previous_latest["value"]
             )
+            previous_authoritative = previous_latest.get(
+                "release_timestamp_is_authoritative",
+                pd.Series(False, index=previous_latest.index),
+            ).fillna(False).astype(bool)
+            incoming_authoritative = incoming.get(
+                "release_timestamp_is_authoritative",
+                pd.Series(False, index=incoming.index),
+            ).fillna(False).astype(bool)
+            previous_initial_available = previous_latest.get(
+                "initial_release_value",
+                pd.Series(pd.NA, index=previous_latest.index),
+            ).notna()
+            incoming_initial_available = incoming.get(
+                "initial_release_value",
+                pd.Series(pd.NA, index=incoming.index),
+            ).notna()
+            metadata_enriched = incoming_authoritative & ~incoming[
+                "observation_date"
+            ].map(previous_authoritative).fillna(False)
+            initial_value_enriched = incoming_initial_available & ~incoming[
+                "observation_date"
+            ].map(previous_initial_available).fillna(False)
             changed = (
                 incoming["_previous_value"].isna()
                 | incoming["value"].ne(incoming["_previous_value"])
+                | metadata_enriched
+                | initial_value_enriched
             )
             incoming = incoming.loc[changed].drop(columns="_previous_value")
             if incoming.empty:
@@ -169,12 +193,101 @@ class SeriesRepository:
             .sort_values("observation_date")
         )
 
+    def load_first_seen_series(self, source: str, series_id: str) -> pd.DataFrame:
+        """Return the first value captured for every observation date.
+
+        This prevents revisions observed in later ingestion runs from leaking
+        backwards.  It is genuinely historical only for observations released
+        after the archive began; coverage metadata keeps that limitation visible.
+        """
+        vintages = self.load_vintages(source, series_id)
+        first_seen = (
+            vintages.sort_values(["observation_date", "retrieved_at"])
+            .drop_duplicates("observation_date", keep="first")
+            .sort_values("observation_date")
+        )
+        if "release_timestamp_is_authoritative" in vintages:
+            authoritative = vintages.loc[
+                vintages["release_timestamp_is_authoritative"].fillna(False).astype(bool)
+            ]
+            if not authoritative.empty:
+                release_metadata = (
+                    authoritative.sort_values(["observation_date", "retrieved_at"])
+                    .drop_duplicates("observation_date", keep="first")
+                    .set_index("observation_date")
+                )
+                for column in (
+                    "release_timestamp",
+                    "release_timestamp_is_authoritative",
+                    "release_timestamp_source",
+                    "initial_release_value",
+                ):
+                    if column in release_metadata:
+                        mapped = first_seen["observation_date"].map(
+                            release_metadata[column]
+                        )
+                        first_seen[column] = mapped.where(
+                            mapped.notna(), first_seen.get(column)
+                        )
+                initial_values = pd.to_numeric(
+                    first_seen.get(
+                        "initial_release_value",
+                        pd.Series(float("nan"), index=first_seen.index),
+                    ),
+                    errors="coerce",
+                )
+                first_seen["value"] = initial_values.where(
+                    initial_values.notna(), first_seen["value"]
+                )
+        return first_seen
+
+    def vintage_series_diagnostics(self, source: str, series_id: str) -> dict[str, Any]:
+        vintages = self.load_vintages(source, series_id)
+        first_seen = (
+            vintages.sort_values(["observation_date", "retrieved_at"])
+            .drop_duplicates("observation_date", keep="first")
+            .copy()
+        )
+        authoritative = first_seen.get(
+            "release_timestamp_is_authoritative",
+            pd.Series(False, index=first_seen.index),
+        ).fillna(False).astype(bool)
+        initial_values = pd.to_numeric(
+            first_seen.get(
+                "initial_release_value", pd.Series(float("nan"), index=first_seen.index)
+            ),
+            errors="coerce",
+        )
+        release = pd.to_datetime(
+            first_seen.get(
+                "release_timestamp", pd.Series(pd.NaT, index=first_seen.index)
+            ),
+            errors="coerce",
+            utc=True,
+        )
+        retrieved = pd.to_datetime(first_seen["retrieved_at"], utc=True)
+        captured_after_release = release.notna() & retrieved.ge(release)
+        return {
+            "source": source,
+            "series_id": series_id,
+            "observations": int(len(first_seen)),
+            "authoritative_release_share": float(authoritative.mean()),
+            "initial_release_value_share": float(initial_values.notna().mean()),
+            "release_before_retrieval_share": float(captured_after_release.mean()),
+            "archive_first_retrieval": retrieved.min().isoformat(),
+            "archive_last_retrieval": retrieved.max().isoformat(),
+        }
+
     def vintage_coverage(self) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
         for path in sorted(self.vintages_dir.glob("*.parquet")):
-            frame = pd.read_parquet(path, columns=["observation_date", "retrieved_at"])
+            frame = pd.read_parquet(path)
             retrieved = pd.to_datetime(frame["retrieved_at"], utc=True)
             observation = pd.to_datetime(frame["observation_date"])
+            authoritative = frame.get(
+                "release_timestamp_is_authoritative",
+                pd.Series(False, index=frame.index),
+            ).fillna(False).astype(bool)
             source, series_id = path.stem.split("__", 1)
             rows.append(
                 {
@@ -186,6 +299,7 @@ class SeriesRepository:
                     "last_snapshot": retrieved.max().isoformat(),
                     "first_observation": str(observation.min().date()),
                     "last_observation": str(observation.max().date()),
+                    "authoritative_release_share": float(authoritative.mean()),
                 }
             )
         return pd.DataFrame(rows)

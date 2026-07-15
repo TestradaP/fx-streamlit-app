@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import ElasticNet
 
 from usdcop.config import load_settings
 from usdcop.data.repository import SeriesRepository
@@ -18,7 +20,8 @@ from usdcop.pipeline.train import load_named_series, series_frequencies
 BENCHMARK_NAMES = ("random_walk", "carry")
 ENSEMBLE_NAME = "ensemble_equal"
 WEIGHTED_ENSEMBLE_NAME = "ensemble_weighted"
-ENSEMBLE_NAMES = (ENSEMBLE_NAME, WEIGHTED_ENSEMBLE_NAME)
+STACKED_ENSEMBLE_NAME = "ensemble_stacked"
+ENSEMBLE_NAMES = (ENSEMBLE_NAME, WEIGHTED_ENSEMBLE_NAME, STACKED_ENSEMBLE_NAME)
 
 
 def _rate_decimal(values: pd.Series) -> pd.Series:
@@ -126,11 +129,115 @@ def _pinball_loss(actual: pd.Series, predicted: pd.Series, quantile: float) -> f
     return float(np.maximum(quantile * error, (quantile - 1) * error).mean())
 
 
+def _conformal_quantile_adjustment(
+    actual: pd.Series,
+    low: pd.Series,
+    high: pd.Series,
+    *,
+    coverage: float = 0.80,
+) -> float:
+    aligned = pd.concat(
+        [actual.rename("actual"), low.rename("low"), high.rename("high")], axis=1
+    ).dropna()
+    if len(aligned) < 30:
+        raise ValueError("At least 30 quantile calibration rows are required")
+    scores = np.maximum.reduce(
+        [
+            aligned["low"].to_numpy() - aligned["actual"].to_numpy(),
+            aligned["actual"].to_numpy() - aligned["high"].to_numpy(),
+            np.zeros(len(aligned)),
+        ]
+    )
+    quantile = min(1.0, np.ceil((len(scores) + 1) * coverage) / len(scores))
+    return float(np.quantile(scores, quantile, method="higher"))
+
+
+def _regularized_stacking_weights(
+    predictions: pd.DataFrame | None,
+    horizon: int,
+    *,
+    alpha: float = 1e-4,
+    shrinkage: float = 0.25,
+) -> dict[str, float]:
+    """Positive regularized stacking fitted only on completed OOS forecasts."""
+    if predictions is None or len(predictions) < 60:
+        return {name: 1 / len(CANDIDATE_NAMES) for name in CANDIDATE_NAMES}
+    columns = [f"{name}_{horizon}d" for name in CANDIDATE_NAMES]
+    frame = predictions[[f"actual_{horizon}d", *columns]].dropna()
+    if len(frame) < 60:
+        return {name: 1 / len(CANDIDATE_NAMES) for name in CANDIDATE_NAMES}
+    model = ElasticNet(
+        alpha=alpha,
+        l1_ratio=0.10,
+        positive=True,
+        fit_intercept=False,
+        max_iter=20000,
+        random_state=20260715,
+    ).fit(frame[columns], frame[f"actual_{horizon}d"])
+    coefficients = np.clip(np.asarray(model.coef_, dtype=float), 0, None)
+    if not np.isfinite(coefficients).all() or coefficients.sum() <= 0:
+        return _historical_ensemble_weights(predictions, horizon)
+    learned = coefficients / coefficients.sum()
+    equal = np.repeat(1 / len(CANDIDATE_NAMES), len(CANDIDATE_NAMES))
+    stabilized = (1 - shrinkage) * learned + shrinkage * equal
+    stabilized /= stabilized.sum()
+    return dict(zip(CANDIDATE_NAMES, stabilized))
+
+
+def _dm_one_sided_pvalue(loss_difference: pd.Series, lag: int) -> float:
+    """HAC Diebold-Mariano-style p-value for candidate loss below benchmark."""
+    values = pd.to_numeric(loss_difference, errors="coerce").dropna().to_numpy()
+    if len(values) < max(30, lag * 2):
+        return np.nan
+    centered = values - values.mean()
+    long_run_variance = float(np.dot(centered, centered) / len(values))
+    for offset in range(1, min(lag, len(values) - 2) + 1):
+        covariance = float(
+            np.dot(centered[offset:], centered[:-offset]) / len(values)
+        )
+        long_run_variance += 2 * (1 - offset / (lag + 1)) * covariance
+    if long_run_variance <= 0 or not np.isfinite(long_run_variance):
+        return 1.0
+    statistic = float(values.mean() / np.sqrt(long_run_variance / len(values)))
+    return float(0.5 * math.erfc(-statistic / np.sqrt(2)))
+
+
+def _holm_adjust(pvalues: dict[str, float]) -> dict[str, float]:
+    finite = {name: value for name, value in pvalues.items() if np.isfinite(value)}
+    ordered = sorted(finite, key=finite.get)
+    adjusted: dict[str, float] = {name: 1.0 for name in pvalues}
+    running = 0.0
+    count = len(ordered)
+    for rank, name in enumerate(ordered):
+        running = max(running, min(1.0, (count - rank) * finite[name]))
+        adjusted[name] = running
+    return adjusted
+
+
 def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
     """Evaluate challengers with purged expanding windows and publish a registry."""
     paths, settings, catalog = load_settings(project_root)
     repository = SeriesRepository(paths.storage_root)
-    named = load_named_series(repository, catalog)
+    named = load_named_series(repository, catalog, vintage_policy="first_seen")
+    vintage_diagnostics = []
+    for source in ("banrep", "fred"):
+        for item in catalog.get(source, []):
+            if not item.get("enabled"):
+                continue
+            try:
+                vintage_diagnostics.append(
+                    repository.vintage_series_diagnostics(source, item["name"])
+                )
+            except FileNotFoundError:
+                vintage_diagnostics.append(
+                    {
+                        "source": source,
+                        "series_id": item["name"],
+                        "observations": 0,
+                        "authoritative_release_share": 0.0,
+                        "archive_missing": True,
+                    }
+                )
     panel = build_daily_panel(named).ffill(
         limit=int(settings["model"].get("max_feature_staleness_days", 120))
     )
@@ -163,7 +270,9 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         if len(train_dates) < int(settings.get("minimum_training_rows", 750)):
             raise RuntimeError("Insufficient purged training history for walk-forward evaluation")
         model = DirectCandidateForecaster(
-            tuple(horizons), random_state=int(settings["model"].get("random_seed", 20260715))
+            tuple(horizons),
+            random_state=int(settings["model"].get("random_seed", 20260715)),
+            recent_window_rows=int(settings["model"].get("recent_window_rows", 1500)),
         ).fit(
             features.loc[train_dates, feature_columns],
             targets.loc[train_dates, target_columns],
@@ -199,6 +308,11 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
                 block[f"{name}_{horizon}d"] * weight
                 for name, weight in weights.items()
             )
+            stacking_weights = _regularized_stacking_weights(previous, horizon)
+            block[f"{STACKED_ENSEMBLE_NAME}_{horizon}d"] = sum(
+                block[f"{name}_{horizon}d"] * weight
+                for name, weight in stacking_weights.items()
+            )
             block[f"quantile_p10_{horizon}d"] = predicted_quantiles[
                 f"pred_log_return_p10_{horizon}d"
             ]
@@ -210,6 +324,7 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
                     "block_start": str(block_dates[0].date()),
                     "horizon_days": horizon,
                     "weights": weights,
+                    "stacking_weights": stacking_weights,
                 }
             )
             block[f"random_walk_{horizon}d"] = 0.0
@@ -240,6 +355,31 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
     for horizon in horizons:
         actual = predictions[f"actual_{horizon}d"]
         spot = predictions["spot"]
+        quantile_low = predictions[f"quantile_p10_{horizon}d"]
+        quantile_high = predictions[f"quantile_p90_{horizon}d"]
+        quantile_split = max(30, int(len(predictions) * 0.70))
+        quantile_calibration_dates = predictions.index[:quantile_split]
+        quantile_coverage_dates = predictions.index[quantile_split:]
+        quantile_adjustment = _conformal_quantile_adjustment(
+            actual.loc[quantile_calibration_dates],
+            quantile_low.loc[quantile_calibration_dates],
+            quantile_high.loc[quantile_calibration_dates],
+        )
+        conformal_low = quantile_low - quantile_adjustment
+        conformal_high = quantile_high + quantile_adjustment
+        quantile_valid = (
+            actual.loc[quantile_coverage_dates].notna()
+            & conformal_low.loc[quantile_coverage_dates].notna()
+            & conformal_high.loc[quantile_coverage_dates].notna()
+        )
+        quantile_empirical_coverage = float(
+            (
+                actual.loc[quantile_coverage_dates][quantile_valid]
+                .ge(conformal_low.loc[quantile_coverage_dates][quantile_valid])
+                & actual.loc[quantile_coverage_dates][quantile_valid]
+                .le(conformal_high.loc[quantile_coverage_dates][quantile_valid])
+            ).mean()
+        )
         random_errors = _price_errors(actual, predictions[f"random_walk_{horizon}d"], spot)
         random_walk_mae = float(random_errors.abs().mean())
         horizon_metrics: dict[str, dict] = {}
@@ -278,6 +418,7 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
                 )
                 row["pinball_loss_p10"] = _pinball_loss(actual, low, 0.10)
                 row["pinball_loss_p90"] = _pinball_loss(actual, high, 0.90)
+                row["conformal_quantile_coverage"] = quantile_empirical_coverage
 
             for window_number, window_start in enumerate(
                 range(0, len(predictions), stability_window_rows), start=1
@@ -334,18 +475,32 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         confirmation_rows = max(60, int(len(predictions) * confirmation_fraction))
         selection_dates = predictions.index[:-confirmation_rows]
         confirmation_dates = predictions.index[-confirmation_rows:]
-        for model_index, model_name in enumerate((*CANDIDATE_NAMES, *ENSEMBLE_NAMES)):
+        selection_random_errors = _price_errors(
+            actual.loc[selection_dates],
+            predictions.loc[selection_dates, f"random_walk_{horizon}d"],
+            spot.loc[selection_dates],
+        )
+        comparison_names = (*CANDIDATE_NAMES, *ENSEMBLE_NAMES)
+        raw_pvalues = {}
+        for model_name in comparison_names:
+            candidate_errors = _price_errors(
+                actual.loc[selection_dates],
+                predictions.loc[selection_dates, f"{model_name}_{horizon}d"],
+                spot.loc[selection_dates],
+            )
+            loss_difference = candidate_errors.abs() - selection_random_errors.abs()
+            raw_pvalues[model_name] = _dm_one_sided_pvalue(
+                loss_difference,
+                lag=max(5, int(np.ceil(horizon * 5 / 7))),
+            )
+        adjusted_pvalues = _holm_adjust(raw_pvalues)
+        for model_index, model_name in enumerate(comparison_names):
             row = horizon_metrics[model_name]
             windows = window_frame.loc[
                 window_frame["horizon_days"].eq(horizon)
                 & window_frame["model"].eq(model_name)
             ]
             positive_window_share = float(windows["skill_vs_random_walk_pct"].gt(0).mean())
-            selection_random_errors = _price_errors(
-                actual.loc[selection_dates],
-                predictions.loc[selection_dates, f"random_walk_{horizon}d"],
-                spot.loc[selection_dates],
-            )
             selection_random_mae = float(selection_random_errors.abs().mean())
             selection_row = _metric_row(
                 horizon,
@@ -386,19 +541,22 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             statistically_better = bool(selection_ci_high < 0)
             probabilistic_calibration_passed = bool(
                 model_name != "quantile_boosting"
-                or 0.72 <= float(row.get("quantile_interval_coverage", np.nan)) <= 0.90
+                or 0.72 <= quantile_empirical_coverage <= 0.90
             )
             qualifies = bool(
                 selection_row["skill_vs_random_walk_pct"] >= minimum_skill
                 and positive_window_share >= minimum_positive_windows
                 and selection_row["directional_accuracy"] >= 0.45
                 and statistically_better
+                and adjusted_pvalues[model_name] < 0.05
                 and confirmation_row["skill_vs_random_walk_pct"] > 0
                 and confirmation_row["directional_accuracy"] >= 0.45
                 and probabilistic_calibration_passed
             )
             row["positive_window_share"] = positive_window_share
             row["statistically_better"] = statistically_better
+            row["dm_pvalue_one_sided"] = raw_pvalues[model_name]
+            row["holm_adjusted_pvalue"] = adjusted_pvalues[model_name]
             row["selection_skill_pct"] = selection_row["skill_vs_random_walk_pct"]
             row["confirmation_skill_pct"] = confirmation_row["skill_vs_random_walk_pct"]
             row["confirmation_directional_accuracy"] = confirmation_row[
@@ -428,7 +586,15 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             "fallback_used": selected_model == "random_walk",
             "metrics": horizon_metrics[selected_model],
             "ensemble_weights": _historical_ensemble_weights(predictions, horizon),
+            "stacking_weights": _regularized_stacking_weights(predictions, horizon),
             "sealed_confirmation_rows": int(confirmation_rows),
+            "quantile_calibration": {
+                "target_coverage": 0.80,
+                "calibration_observations": int(len(quantile_calibration_dates)),
+                "coverage_observations": int(len(quantile_coverage_dates)),
+                "adjustment_log_return": quantile_adjustment,
+                "empirical_coverage": quantile_empirical_coverage,
+            },
             "calibration": {
                 "observations": int(len(calibration_residuals)),
                 "coverage_test_observations": int(len(coverage_residuals)),
@@ -471,6 +637,8 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         "sealed_confirmation_fraction": confirmation_fraction,
         "point_in_time_capture_active": True,
         "historical_vintage_complete": False,
+        "backtest_vintage_policy": "first_value_seen_by_archive",
+        "vintage_diagnostics": vintage_diagnostics,
         "point_forecast_validation_passed": candidate_selected_all,
         "operational_forecast_valid": True,
         "academic_ready": False,

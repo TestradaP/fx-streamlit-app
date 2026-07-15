@@ -30,7 +30,11 @@ class FredClientTests(unittest.TestCase):
         client.session = FakeSession(
             {
                 "observations": [
-                    {"date": "2026-07-13", "value": "4.35"},
+                    {
+                        "date": "2026-07-13",
+                        "value": "4.35",
+                        "realtime_start": "2026-07-14",
+                    },
                     {"date": "2026-07-14", "value": "."},
                 ]
             }
@@ -40,7 +44,12 @@ class FredClientTests(unittest.TestCase):
 
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["value"], 4.35)
+        self.assertEqual(frame.iloc[0]["initial_release_value"], 4.35)
         self.assertEqual(frame.iloc[0]["series_id"], "SOFR")
+        self.assertTrue(frame.iloc[0]["release_timestamp_is_authoritative"])
+        self.assertEqual(
+            frame.iloc[0]["release_timestamp"].date().isoformat(), "2026-07-14"
+        )
         self.assertEqual(client.session.last_request[1]["params"]["api_key"], "test-key")
 
     def test_requires_api_key(self):

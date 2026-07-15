@@ -144,6 +144,19 @@ def _candidate_prediction(
                 for model_name, weight in weights.items()
             )
         )
+    if name == "ensemble_stacked":
+        weights = weights or {
+            model_name: 1 / len(model.models) for model_name in model.models
+        }
+        return float(
+            sum(
+                float(weight)
+                * model.models[model_name][horizon].predict(
+                    values[model.feature_names]
+                )[0]
+                for model_name, weight in weights.items()
+            )
+        )
     return float(model.models[name][horizon].predict(values[model.feature_names])[0])
 
 
@@ -161,7 +174,11 @@ def _candidate_driver_table(
         model_name = selection.get("selected_model", "random_walk")
         if model_name in {"random_walk", "carry"}:
             continue
-        weights = selection.get("ensemble_weights")
+        weights = (
+            selection.get("stacking_weights")
+            if model_name == "ensemble_stacked"
+            else selection.get("ensemble_weights")
+        )
         prediction = _candidate_prediction(
             model, latest, model_name, horizon, weights=weights
         )
@@ -332,6 +349,17 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
                             for name, weight in weights.items()
                         )
                     )
+                elif selected_model == "ensemble_stacked":
+                    weights = selection.get("stacking_weights", {})
+                    log_return = float(
+                        sum(
+                            float(weight)
+                            * candidate_predictions[
+                                f"{name}_pred_log_return_{horizon}d"
+                            ]
+                            for name, weight in weights.items()
+                        )
+                    )
                 else:
                     log_return = float(
                         candidate_predictions[
@@ -347,11 +375,18 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
                     output.loc[index, "p10"] = spot * np.exp(log_return - float(radius))
                     output.loc[index, "p90"] = spot * np.exp(log_return + float(radius))
                 if selected_model == "quantile_boosting" and quantile_predictions is not None:
+                    quantile_adjustment = float(
+                        selection.get("quantile_calibration", {}).get(
+                            "adjustment_log_return", 0.0
+                        )
+                    )
                     output.loc[index, "p10"] = spot * np.exp(
                         float(quantile_predictions[f"pred_log_return_p10_{horizon}d"])
+                        - quantile_adjustment
                     )
                     output.loc[index, "p90"] = spot * np.exp(
                         float(quantile_predictions[f"pred_log_return_p90_{horizon}d"])
+                        + quantile_adjustment
                     )
                 residuals = np.asarray(calibration.get("residuals", []), dtype=float)
                 if residuals.size:
