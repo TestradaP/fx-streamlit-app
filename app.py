@@ -2183,9 +2183,10 @@ def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
         # Intentamos importar la interfaz gráfica desde la carpeta del Módulo 11
         from usdcop.ui import module as ui_module
         
-        # Ejecutamos la interfaz (aquí asumo que la función principal se llama main o render)
-        # Si arroja error de atributo, lo ajustaremos en el siguiente paso.
-        if hasattr(ui_module, 'main'):
+        # Ejecutamos la interfaz usando la función de inicio correcta del módulo
+        if hasattr(ui_module, 'render_ui'):
+            ui_module.render_ui()
+        elif hasattr(ui_module, 'main'):
             ui_module.main()
         elif hasattr(ui_module, 'render'):
             ui_module.render()
