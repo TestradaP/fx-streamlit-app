@@ -6,11 +6,20 @@ on:
     - cron: "15 11 * * 1-5"  # 06:15 America/Bogota
     - cron: "15 22 * * 1-5"  # 17:15 America/Bogota
 
+permissions:
+  contents: write
+
+concurrency:
+  group: usdcop-daily-publish
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -31,6 +40,19 @@ jobs:
             modulo_11_usdcop/data/store
             modulo_11_usdcop/outputs
           retention-days: 30
+      - name: Publish forecast for Streamlit Cloud
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modulo_11_usdcop/outputs/latest_forecasts.csv
+          git add modulo_11_usdcop/outputs/forecast_status.json
+          if git diff --cached --quiet; then
+            echo "Forecast files are already current."
+            exit 0
+          fi
+          git commit -m "chore: publish daily USD/COP forecast [skip ci]"
+          git push origin HEAD:main
 
-# Importante: los runners son efimeros. Para produccion, reemplace artifacts por
-# PostgreSQL/object storage persistente y gestione secretos mediante el entorno.
+# Los archivos de pronostico pequeños se publican en main para que Streamlit
+# Cloud se redespliegue. El store histórico completo permanece como artifact.
