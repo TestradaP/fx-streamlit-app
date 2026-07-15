@@ -3,7 +3,7 @@ pandas>=2.2
 numpy>=1.26
 requests>=2.31
 pyarrow>=15
-scikit-learn>=1.4
+scikit-learn==1.6.1
 statsmodels>=0.14
 plotly>=5.22
 PyYAML>=6.0
@@ -17,4 +17,3 @@ fpdf
 google-generativeai
 gspread
 google-auth
-

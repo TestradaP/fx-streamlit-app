@@ -8,6 +8,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 
 from usdcop.config import load_settings
 from usdcop.data.repository import SeriesRepository
@@ -58,7 +59,15 @@ def train_models(project_root: str | Path | None = None) -> dict:
     model.fit(dataset[feature_columns], targets)
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     model_path = paths.output_root / f"elastic_net_{version}.joblib"
-    joblib.dump({"model": model, "feature_columns": feature_columns, "version": version}, model_path)
+    joblib.dump(
+        {
+            "model": model,
+            "feature_columns": feature_columns,
+            "version": version,
+            "sklearn_version": sklearn.__version__,
+        },
+        model_path,
+    )
     (paths.output_root / "champion_model.txt").write_text(model_path.name, encoding="utf-8")
     metadata = {
         "version": version,
@@ -66,6 +75,7 @@ def train_models(project_root: str | Path | None = None) -> dict:
         "rows": len(dataset),
         "features": feature_columns,
         "horizons": settings["horizons_calendar_days"],
+        "sklearn_version": sklearn.__version__,
         "status": "TRAINED_NOT_YET_GOVERNANCE_APPROVED",
     }
     (paths.output_root / f"model_metadata_{version}.json").write_text(
