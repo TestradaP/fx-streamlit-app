@@ -1,0 +1,160 @@
+{
+  "generated_at": "2026-07-15T19:57:28.312601+00:00",
+  "status": "success",
+  "updated": [
+    "banrep:trm",
+    "banrep:policy_rate",
+    "banrep:ibr_on",
+    "banrep:reserves",
+    "banrep:tes_cop_1y",
+    "banrep:tes_cop_5y",
+    "banrep:tes_cop_10y",
+    "banrep:inflation",
+    "banrep:current_account",
+    "fred:sofr",
+    "fred:vix",
+    "fred:broad_usd",
+    "fred:brent",
+    "fred:treasury_2y",
+    "fred:treasury_10y",
+    "dane:trade_balance"
+  ],
+  "failed": [],
+  "quality": [
+    {
+      "series": "trm",
+      "passed": true,
+      "rows": 10000,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 0,
+      "messages": []
+    },
+    {
+      "series": "policy_rate",
+      "passed": true,
+      "rows": 10000,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 0,
+      "messages": []
+    },
+    {
+      "series": "ibr_on",
+      "passed": true,
+      "rows": 4519,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 0,
+      "messages": []
+    },
+    {
+      "series": "reserves",
+      "passed": true,
+      "rows": 798,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 15,
+      "messages": []
+    },
+    {
+      "series": "tes_cop_1y",
+      "passed": true,
+      "rows": 5722,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 5,
+      "messages": []
+    },
+    {
+      "series": "tes_cop_5y",
+      "passed": true,
+      "rows": 5722,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 5,
+      "messages": []
+    },
+    {
+      "series": "tes_cop_10y",
+      "passed": true,
+      "rows": 5722,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 5,
+      "messages": []
+    },
+    {
+      "series": "inflation",
+      "passed": true,
+      "rows": 852,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 15,
+      "messages": []
+    },
+    {
+      "series": "current_account",
+      "passed": true,
+      "rows": 105,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 106,
+      "messages": []
+    },
+    {
+      "series": "sofr",
+      "passed": true,
+      "rows": 2067,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 1,
+      "messages": []
+    },
+    {
+      "series": "vix",
+      "passed": true,
+      "rows": 9229,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 1,
+      "messages": []
+    },
+    {
+      "series": "broad_usd",
+      "passed": true,
+      "rows": 5144,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 5,
+      "messages": []
+    },
+    {
+      "series": "brent",
+      "passed": true,
+      "rows": 9932,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 2,
+      "messages": []
+    },
+    {
+      "series": "treasury_2y",
+      "passed": true,
+      "rows": 12524,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 2,
+      "messages": []
+    },
+    {
+      "series": "treasury_10y",
+      "passed": true,
+      "rows": 16116,
+      "duplicate_dates": 0,
+      "missing_values": 0,
+      "age_days": 2,
+      "messages": []
+    }
+  ]
+}
