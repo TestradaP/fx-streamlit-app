@@ -61,9 +61,19 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
         output.write_text(json.dumps(summary.__dict__, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
         details["updated"].append("dane:trade_balance")
     except Exception as exc:  # noqa: BLE001
-        LOGGER.exception("DANE update failed")
+        LOGGER.warning("Optional DANE update failed: %s", exc)
         details["failed"].append({"series": "dane:trade_balance", "error": str(exc)})
 
-    status = "success" if not details["failed"] else "partial_success"
+    required_failures = [
+        failure
+        for failure in details["failed"]
+        if not str(failure["series"]).startswith("dane:")
+    ]
+    if required_failures:
+        status = "failure"
+    elif details["failed"]:
+        status = "partial_success"
+    else:
+        status = "success"
     repository.record_run(status, details, started_at=started)
     return {"status": status, **details}

@@ -63,9 +63,27 @@ class UpdateDataQualityTests(unittest.TestCase):
                 result = update_all()
 
         repository.save_series.assert_not_called()
-        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["status"], "failure")
         self.assertFalse(result["quality"][0]["passed"])
         self.assertEqual(result["failed"][0]["series"], "banrep:stale_test")
+
+    def test_dane_failure_is_optional(self):
+        repository = Mock()
+        catalog = {"banrep": [], "fred": [], "dane": {}}
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = SimpleNamespace(storage_root=Path(temporary_directory))
+            with (
+                patch("usdcop.pipeline.update_data.load_settings", return_value=(paths, {}, catalog)),
+                patch("usdcop.pipeline.update_data.SeriesRepository", return_value=repository),
+                patch("usdcop.pipeline.update_data.DaneTradeClient") as dane_type,
+            ):
+                dane_type.return_value.fetch_latest_summary.side_effect = RuntimeError("offline")
+                result = update_all()
+
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["failed"][0]["series"], "dane:trade_balance")
+        repository.record_run.assert_called_once()
 
 
 if __name__ == "__main__":
