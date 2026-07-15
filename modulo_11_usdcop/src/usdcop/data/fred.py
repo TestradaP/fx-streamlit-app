@@ -9,7 +9,7 @@ from .http import build_session
 
 
 class FredClient:
-    CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
+    CSV_URL = "https://api.stlouisfed.org/fred/series/observations"
 
     def __init__(self, timeout_seconds: int = 30) -> None:
         self.timeout_seconds = timeout_seconds
@@ -21,10 +21,14 @@ class FredClient:
 
     def fetch_series(self, series_id: str) -> pd.DataFrame:
         response = self.session.get(
-            self.CSV_URL,
-            params={"id": series_id},
-            timeout=self.timeout_seconds,
-        )
+        self.CSV_URL,
+        params={
+            "series_id": series_id,
+            "api_key": "3bf7d33d48baea0233b409388e170433", # Pega tu código de FRED
+            "file_type": "json"
+        },
+        timeout=self.timeout_seconds,
+    )
         response.raise_for_status()
         frame = pd.read_csv(StringIO(response.text))
         if frame.shape[1] < 2:
