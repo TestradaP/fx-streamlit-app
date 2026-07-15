@@ -2165,33 +2165,39 @@ def app_viaticos():
 # ========================================================
 # PUENTE DE CONEXIÓN: MÓDULO 11 (Inteligencia Cambiaria)
 # ========================================================
-# 1. Le decimos a Python que reconozca la carpeta 'src' del módulo 11
-# ========================================================
-# PUENTE DE CONEXIÓN: MÓDULO 11 (Inteligencia Cambiaria)
-# ========================================================
 ruta_mod_11 = Path(__file__).parent / "modulo_11_usdcop"
 ruta_src = ruta_mod_11 / "src"
 
-# Aseguramos que Python encuentre las carpetas internas en Linux/Nube
+# 1. Aseguramos que Python encuentre las carpetas internas en la Nube
 if str(ruta_src) not in sys.path:
     sys.path.insert(0, str(ruta_src))
 if str(ruta_mod_11) not in sys.path:
     sys.path.insert(0, str(ruta_mod_11))
 
-# 2. Creamos la función que llamaste en tu menú
+# 2. TRUCO DE RUTAS: Crear enlaces simbólicos en caliente para la Nube
+# Si el módulo busca "data" o "outputs" en la raíz, lo redirigimos a modulo_11_usdcop
+for carpeta in ["data", "outputs"]:
+    enlace_raiz = Path(__file__).parent / carpeta
+    destino_real = ruta_mod_11 / carpeta
+    
+    if destino_real.exists() and not enlace_raiz.exists():
+        try:
+            import os
+            os.symlink(destino_real, enlace_raiz)
+        except Exception:
+            pass # Si falla por permisos en local, no pasa nada
+
+# 3. Función de inicio
 def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
     st.title("📈 Módulo 11: Inteligencia Cambiaria USD/COP")
     
-    # Verificamos que la carpeta exista físicamente donde debe estar
     if not ruta_mod_11.exists():
         st.error("❌ No se encontró la carpeta 'modulo_11_usdcop'. Asegúrate de haberla descomprimido junto a app.py.")
         return
         
     try:
-        # Intentamos importar la interfaz gráfica desde la carpeta del Módulo 11
         from usdcop.ui import module as ui_module
         
-        # Ejecutamos la interfaz usando la función de inicio correcta del módulo
         if hasattr(ui_module, 'render_module'):
             ui_module.render_module()
         elif hasattr(ui_module, 'render_ui'):
@@ -2204,7 +2210,6 @@ def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
             
     except ImportError as e:
         st.error(f"❌ Error al cargar las librerías del Módulo 11: {e}")
-        st.info("💡 Recuerda instalar los requerimientos en tu terminal: pip install -r modulo_11_usdcop/requirements.txt")
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
