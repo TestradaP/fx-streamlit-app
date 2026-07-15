@@ -4,8 +4,10 @@ day_count_basis: 360
 minimum_training_rows: 750
 validation:
   minimum_test_rows: 180
-  backtest_rows: 500
-  refit_block_rows: 100
+  backtest_rows: 750
+  refit_block_rows: 63
+  stability_window_rows: 125
+  confirmation_fraction: 0.20
   minimum_skill_pct: 2.0
   minimum_positive_window_share: 0.60
   rolling_error_window: 120
@@ -20,5 +22,5 @@ refresh:
 model:
   champion_metric: crps
   max_feature_staleness_days: 120
-  retrain_weekday: 6
+  retrain_each_workflow: true
   random_seed: 20260715

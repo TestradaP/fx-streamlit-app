@@ -67,7 +67,7 @@ La API REST de SUAMECA usada por el conector es publica pero no esta documentada
 El flujo recomendado es:
 
 1. `update_daily.py`: descarga y valida datos.
-2. `train_models.py`: reentrena segun calendario, no en cada carga de pagina.
+2. `train_models.py`: reentrena en cada workflow, nunca durante una carga de pagina.
 3. `run_backtest.py`: compara challengers con benchmarks y publica el registro champion.
 4. `run_forecast.py`: aplica el método aceptado, intervalos y monitoreo de deriva.
 5. Streamlit lee artefactos versionados de una base persistente.
@@ -76,13 +76,13 @@ El workflow incluido publica `outputs/latest_forecasts.csv`,
 `outputs/forecast_drivers.csv`, `outputs/backtest_metrics.csv`,
 `outputs/backtest_predictions.csv`, métricas por ventana y régimen,
 `outputs/champion_registry.json`, `outputs/model_monitor.json`,
-`outputs/model_validation.json` y
+`outputs/model_validation.json`, `outputs/point_in_time_coverage.json` y
 `outputs/forecast_status.json`, junto con `outputs/data_quality_latest.json`, en la
 rama `main` después de una ejecución correcta. Streamlit Community Cloud detecta
 ese commit y actualiza la aplicación. El usuario revisa la calidad de los datos en
 "Frescura y gobierno"; esta revisión no equivale a aprobar estadísticamente el
-modelo. La pestaña "Drivers" muestra la descomposición ElasticNet por variable y
-por grupo para cada horizonte.
+modelo. La pestaña "Drivers" muestra efectos locales por variable y grupo para el
+modelo seleccionado; el benchmark random walk no tiene contribuciones económicas.
 Los Parquet y SQLite completos se conservan como artifacts de GitHub Actions para
 evitar aumentar innecesariamente el historial Git.
 
@@ -94,16 +94,21 @@ supera los benchmarks fuera de muestra, demuestra estabilidad por régimen y
 calibra sus intervalos. La validación actual usa ventanas expansivas, purga de 60
 días y selección temporal de hiperparámetros. Las series mensuales, trimestrales y
 FRED reciben rezagos conservadores de disponibilidad; aun así, para investigación
-académica definitiva se requiere una base histórica point-in-time con vintages.
+académica definitiva se requiere acumular cobertura histórica point-in-time. Cada
+descarga conserva únicamente observaciones nuevas o revisadas como snapshots
+inmutables, sin afirmar que revisiones anteriores puedan reconstruirse.
 
-Los challengers incluidos son ElasticNet, Ridge, Huber, gradient boosting y Ridge
-por régimen VIX, además de un ensamble simple. La selección usa 500 observaciones fuera de muestra, ventanas
-expansivas con purga, estabilidad anual, regímenes VIX y un intervalo de confianza
-block-bootstrap. Si ninguno cumple, el método publicado vuelve automáticamente a
-spot sin cambio. Los intervalos P10-P90 se calibran con residuos fuera de muestra.
+Los challengers incluidos son ElasticNet, Ridge, Huber, gradient boosting,
+PCA-Ridge, Extra Trees, gradient boosting cuantílico y Ridge por régimen VIX,
+además de ensambles igualitario y ponderado por error OOS pasado. La selección usa
+750 observaciones fuera de muestra, bloques expansivos purgados de 63 fechas,
+ventanas de estabilidad y una muestra final sellada de 20%. Exige además un
+intervalo block-bootstrap favorable. Si ninguno cumple, vuelve automáticamente a
+spot sin cambio. Los intervalos P10-P90 se calibran con residuos OOS o con los
+cuantiles del modelo cuando este resulta seleccionado.
 
-El workflow puntúa y valida dos veces por día hábil. Los challengers se reentrenan
-los sábados y en ejecuciones manuales; el scoring diario no reentrena innecesariamente.
+El workflow actualiza, reentrena, puntúa y valida dos veces por día hábil. Esto
+mantiene sincronizados el registro champion y el artefacto serializado.
 
 Para un despliegue multiusuario use PostgreSQL u object storage. El almacenamiento local incluido (Parquet + SQLite) es apropiado para desarrollo y un MVP controlado.
 

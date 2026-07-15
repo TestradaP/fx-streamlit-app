@@ -14,7 +14,8 @@ Apoyar decisiones de caja y cobertura, no maximizar utilidad especulativa. La fu
 
 ## Validacion
 
-- Backtest walk-forward con vintages y fechas de publicacion.
+- Backtest walk-forward con fechas de disponibilidad; los vintages inmutables se
+  incorporan progresivamente desde la primera captura registrada.
 - Evaluacion separada para 15, 30, 45 y 60 dias calendario.
 - MAE, RMSE/MASE, acierto direccional, pinball loss, CRPS y cobertura de intervalos.
 - PnL o costo de hedge bajo una politica predefinida; no optimizar la politica con el mismo periodo de prueba.
@@ -24,12 +25,13 @@ Apoyar decisiones de caja y cobertura, no maximizar utilidad especulativa. La fu
 
 El champion solo cambia cuando el challenger supera los benchmarks en varias ventanas, mantiene cobertura probabilistica y pasa revision humana. Cada artefacto debe guardar version de codigo, datos, hiperparametros, metricas y aprobacion.
 
-La implementación evalúa ElasticNet, Ridge, Huber, gradient boosting, Ridge por
-régimen VIX y un ensamble
-igualitario. Cada horizonte se decide por separado. La promoción automática exige
+La implementación evalúa ElasticNet, Ridge, Huber, gradient boosting, PCA-Ridge,
+Extra Trees, boosting cuantílico, Ridge por régimen VIX y ensambles igualitario y
+ponderado por error OOS histórico. Cada horizonte se decide por separado. La promoción automática exige
 skill mínimo, dirección, mayoría de ventanas positivas y límite superior negativo
-del intervalo block-bootstrap de la diferencia de error. Si no se cumplen todas las
-reglas, el registro selecciona `random_walk` como fallback operativo.
+del intervalo block-bootstrap de la diferencia de error. Además debe mejorar en
+una muestra final sellada que no interviene en la selección inicial. Si no se
+cumplen todas las reglas, el registro selecciona `random_walk` como fallback.
 
 ## Politica de salida
 
@@ -49,7 +51,7 @@ no reentrena, no cambia el modelo champion y no constituye aprobación estadíst
 ## Criterio académico
 
 La etiqueta de uso académico confirmatorio permanece deshabilitada mientras falte
-cualquiera de estos elementos: datos point-in-time con vintages, superioridad consistente
+cualquiera de estos elementos: cobertura histórica point-in-time suficiente, superioridad consistente
 frente a spot sin cambio y carry, estabilidad por régimen y cobertura fuera de muestra de
 intervalos probabilísticos. Los valores que no cumplan estos criterios se publican únicamente
 como resultados experimentales reproducibles.

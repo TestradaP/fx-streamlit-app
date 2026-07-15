@@ -97,4 +97,24 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
         json.dumps(result, ensure_ascii=False, default=str, indent=2),
         encoding="utf-8",
     )
+    vintage_coverage = repository.vintage_coverage()
+    vintage_rows = (
+        vintage_coverage.to_dict(orient="records")
+        if hasattr(vintage_coverage, "to_dict")
+        and vintage_coverage.__class__.__module__.startswith("pandas")
+        else []
+    )
+    vintage_payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "immutable_ingestion_snapshots",
+        "historical_vintage_complete": False,
+        "note": (
+            "Point-in-time coverage begins with the first stored snapshot; older "
+            "revisions cannot be reconstructed retrospectively."
+        ),
+        "series": vintage_rows,
+    }
+    (paths.output_root / "point_in_time_coverage.json").write_text(
+        json.dumps(vintage_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return result

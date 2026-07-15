@@ -5,7 +5,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.decomposition import PCA
+from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
 from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNetCV, HuberRegressor, RidgeCV
@@ -19,6 +20,9 @@ CANDIDATE_NAMES = (
     "ridge",
     "huber",
     "gradient_boosting",
+    "pca_ridge",
+    "extra_trees",
+    "quantile_boosting",
     "regime_ridge",
 )
 
@@ -90,6 +94,29 @@ class DirectCandidateForecaster:
     random_state: int = 20260715
     models: dict[str, dict[int, Any]] = field(default_factory=dict)
     feature_names: list[str] = field(default_factory=list)
+    quantile_models: dict[int, dict[float, Pipeline]] = field(default_factory=dict)
+
+    def _quantile_pipeline(self, feature_count: int, quantile: float) -> Pipeline:
+        return Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("select", SelectKBest(f_regression, k=min(40, feature_count))),
+                (
+                    "model",
+                    HistGradientBoostingRegressor(
+                        loss="quantile",
+                        quantile=quantile,
+                        learning_rate=0.04,
+                        max_iter=250,
+                        max_leaf_nodes=15,
+                        min_samples_leaf=30,
+                        l2_regularization=1.0,
+                        early_stopping=False,
+                        random_state=self.random_state,
+                    ),
+                ),
+            ]
+        )
 
     def _pipelines(self, feature_count: int) -> dict[str, Pipeline]:
         selected = min(40, feature_count)
@@ -146,11 +173,45 @@ class DirectCandidateForecaster:
                     ),
                 ]
             ),
+            "pca_ridge": Pipeline(
+                [
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("scale", StandardScaler()),
+                    ("pca", PCA(n_components=0.95, svd_solver="full")),
+                    (
+                        "model",
+                        RidgeCV(
+                            alphas=np.logspace(-3, 3, 25),
+                            cv=TimeSeriesSplit(n_splits=5),
+                            scoring="neg_mean_absolute_error",
+                        ),
+                    ),
+                ]
+            ),
+            "extra_trees": Pipeline(
+                [
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("select", SelectKBest(f_regression, k=selected)),
+                    (
+                        "model",
+                        ExtraTreesRegressor(
+                            n_estimators=200,
+                            max_depth=8,
+                            min_samples_leaf=12,
+                            max_features=0.7,
+                            n_jobs=-1,
+                            random_state=self.random_state,
+                        ),
+                    ),
+                ]
+            ),
+            "quantile_boosting": self._quantile_pipeline(feature_count, 0.50),
         }
 
     def fit(self, X: pd.DataFrame, targets: pd.DataFrame) -> "DirectCandidateForecaster":
         self.feature_names = list(X.columns)
         self.models = {name: {} for name in CANDIDATE_NAMES}
+        self.quantile_models = {}
         for horizon in self.horizons:
             target_column = f"target_log_return_{horizon}d"
             if target_column not in targets:
@@ -165,6 +226,13 @@ class DirectCandidateForecaster:
             for name, pipeline in pipelines.items():
                 pipeline.fit(horizon_X, horizon_y)
                 self.models[name][horizon] = pipeline
+            self.quantile_models[horizon] = {}
+            for quantile in (0.10, 0.90):
+                quantile_model = self._quantile_pipeline(
+                    len(self.feature_names), quantile
+                )
+                quantile_model.fit(horizon_X, horizon_y)
+                self.quantile_models[horizon][quantile] = quantile_model
         return self
 
     def predict_all(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -176,6 +244,17 @@ class DirectCandidateForecaster:
                 output[f"{name}_pred_log_return_{horizon}d"] = model.predict(
                     X[self.feature_names]
                 )
+        return pd.DataFrame(output, index=X.index)
+
+    def predict_quantiles(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not self.quantile_models:
+            raise RuntimeError("Quantile models have not been fitted")
+        output: dict[str, np.ndarray] = {}
+        for horizon, models in self.quantile_models.items():
+            low = models[0.10].predict(X[self.feature_names])
+            high = models[0.90].predict(X[self.feature_names])
+            output[f"pred_log_return_p10_{horizon}d"] = np.minimum(low, high)
+            output[f"pred_log_return_p90_{horizon}d"] = np.maximum(low, high)
         return pd.DataFrame(output, index=X.index)
 
     def predict_log_returns(

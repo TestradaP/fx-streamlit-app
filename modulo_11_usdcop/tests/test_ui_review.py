@@ -10,6 +10,7 @@ from usdcop.ui.module import (
     _forecast_review_id,
     _load_drivers,
     _load_monitor,
+    _load_point_in_time_coverage,
     _load_quality_snapshot,
     _load_registry,
     _load_validation,
@@ -64,7 +65,21 @@ class DailyReviewTests(unittest.TestCase):
 
             actual = _load_validation(SimpleNamespace(output_root=output_root))
 
-        self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected)
+
+    def test_loads_point_in_time_coverage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary)
+            expected = {"historical_vintage_complete": False, "series": []}
+            (output_root / "point_in_time_coverage.json").write_text(
+                json.dumps(expected), encoding="utf-8"
+            )
+
+            actual = _load_point_in_time_coverage(
+                SimpleNamespace(output_root=output_root)
+            )
+
+            self.assertEqual(actual, expected)
 
     def test_loads_registry_and_monitor(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

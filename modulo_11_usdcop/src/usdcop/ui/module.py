@@ -69,6 +69,14 @@ def _load_validation(paths) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _load_point_in_time_coverage(paths) -> dict | None:
+    coverage_path = paths.output_root / "point_in_time_coverage.json"
+    if not coverage_path.exists():
+        return None
+    value = json.loads(coverage_path.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else None
+
+
 def _load_monitor(paths) -> dict | None:
     monitor_path = paths.output_root / "model_monitor.json"
     if not monitor_path.exists():
@@ -108,6 +116,7 @@ def render_module(project_root: str | Path | None = None) -> None:
     drivers = _load_drivers(paths)
     quality_snapshot = _load_quality_snapshot(paths)
     validation = _load_validation(paths)
+    point_in_time = _load_point_in_time_coverage(paths)
     monitor = _load_monitor(paths)
     registry = _load_registry(paths)
     point_validation_passed = bool(
@@ -387,6 +396,17 @@ def render_module(project_root: str | Path | None = None) -> None:
                 "positive_window_share",
                 "qualifies",
             ]
+            summary_columns.extend(
+                column
+                for column in (
+                    "selection_skill_pct",
+                    "confirmation_skill_pct",
+                    "confirmation_directional_accuracy",
+                    "quantile_interval_coverage",
+                    "probabilistic_calibration_passed",
+                )
+                if column in model_metrics
+            )
             st.dataframe(
                 model_metrics[summary_columns],
                 width="stretch",
@@ -410,6 +430,19 @@ def render_module(project_root: str | Path | None = None) -> None:
                         "Ventanas con mejora", format="%.1f%%"
                     ),
                     "qualifies": "Clasifica",
+                    "selection_skill_pct": st.column_config.NumberColumn(
+                        "Mejora en selección", format="%.1f%%"
+                    ),
+                    "confirmation_skill_pct": st.column_config.NumberColumn(
+                        "Mejora muestra sellada", format="%.1f%%"
+                    ),
+                    "confirmation_directional_accuracy": st.column_config.NumberColumn(
+                        "Dirección muestra sellada", format="%.1%%"
+                    ),
+                    "quantile_interval_coverage": st.column_config.NumberColumn(
+                        "Cobertura cuantílica", format="%.1%%"
+                    ),
+                    "probabilistic_calibration_passed": "Calibración probabilística",
                 },
             )
             comparison = px.line(
@@ -427,8 +460,9 @@ def render_module(project_root: str | Path | None = None) -> None:
             )
             st.plotly_chart(comparison, width="stretch")
             st.caption(
-                "Diseño: ventana expansiva, bloques de 100 observaciones y purga de 60 días "
-                "calendario. La selección de hiperparámetros usa TimeSeriesSplit."
+                "Diseño: ventana expansiva purgada, bloques de 63 observaciones, 750 fechas "
+                "fuera de muestra y 20% final sellado para confirmación. La selección de "
+                "hiperparámetros usa TimeSeriesSplit."
             )
             if validation and validation.get("academic_blockers"):
                 st.markdown("#### Pendientes para uso académico confirmatorio")
@@ -480,6 +514,23 @@ def render_module(project_root: str | Path | None = None) -> None:
             st.warning(
                 "Aún no existe el control de calidad publicado. Ejecute el workflow diario actualizado."
             )
+
+        st.markdown("#### Cobertura point-in-time")
+        if point_in_time:
+            vintage_rows = pd.DataFrame(point_in_time.get("series", []))
+            if vintage_rows.empty:
+                st.caption(
+                    "La captura de vintages está activa y comenzará con la próxima descarga."
+                )
+            else:
+                st.dataframe(vintage_rows, width="stretch", hide_index=True)
+            if not point_in_time.get("historical_vintage_complete"):
+                st.warning(
+                    "Los snapshots son inmutables desde su primera captura, pero todavía no "
+                    "reconstruyen revisiones anteriores a esa fecha."
+                )
+        else:
+            st.caption("La cobertura point-in-time se publicará en la próxima ejecución diaria.")
 
         st.markdown("#### Monitoreo del modelo")
         if monitor:

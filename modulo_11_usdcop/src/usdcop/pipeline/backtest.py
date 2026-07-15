@@ -17,6 +17,8 @@ from usdcop.pipeline.train import load_named_series, series_frequencies
 
 BENCHMARK_NAMES = ("random_walk", "carry")
 ENSEMBLE_NAME = "ensemble_equal"
+WEIGHTED_ENSEMBLE_NAME = "ensemble_weighted"
+ENSEMBLE_NAMES = (ENSEMBLE_NAME, WEIGHTED_ENSEMBLE_NAME)
 
 
 def _rate_decimal(values: pd.Series) -> pd.Series:
@@ -100,6 +102,30 @@ def _conformal_radius(residuals: pd.Series, coverage: float = 0.80) -> float:
     return float(np.quantile(values, quantile, method="higher"))
 
 
+def _historical_ensemble_weights(
+    predictions: pd.DataFrame | None,
+    horizon: int,
+) -> dict[str, float]:
+    """Inverse-MAE weights using only already completed OOS blocks."""
+    if predictions is None or predictions.empty:
+        return {name: 1 / len(CANDIDATE_NAMES) for name in CANDIDATE_NAMES}
+    actual = predictions[f"actual_{horizon}d"]
+    spot = predictions["spot"]
+    inverse_errors: dict[str, float] = {}
+    for name in CANDIDATE_NAMES:
+        errors = _price_errors(actual, predictions[f"{name}_{horizon}d"], spot).abs()
+        mae = float(errors.mean())
+        inverse_errors[name] = 1 / max(mae, 1e-6)
+    total = sum(inverse_errors.values())
+    return {name: value / total for name, value in inverse_errors.items()}
+
+
+def _pinball_loss(actual: pd.Series, predicted: pd.Series, quantile: float) -> float:
+    valid = actual.notna() & predicted.notna()
+    error = actual.loc[valid] - predicted.loc[valid]
+    return float(np.maximum(quantile * error, (quantile - 1) * error).mean())
+
+
 def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
     """Evaluate challengers with purged expanding windows and publish a registry."""
     paths, settings, catalog = load_settings(project_root)
@@ -127,6 +153,7 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
     test_dates = eligible_dates[-test_rows:]
     step = int(settings["validation"].get("refit_block_rows", 100))
     prediction_blocks: list[pd.DataFrame] = []
+    ensemble_weight_history: list[dict] = []
 
     for block_start in range(0, len(test_dates), step):
         block_dates = test_dates[block_start : block_start + step]
@@ -142,6 +169,9 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             targets.loc[train_dates, target_columns],
         )
         predicted = model.predict_all(features.loc[block_dates, feature_columns])
+        predicted_quantiles = model.predict_quantiles(
+            features.loc[block_dates, feature_columns]
+        )
         block = pd.DataFrame(index=block_dates)
         block["spot"] = panel.loc[block_dates, "trm"]
         block["regime"] = pd.cut(
@@ -163,6 +193,25 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             block[f"{ENSEMBLE_NAME}_{horizon}d"] = block[
                 [f"{name}_{horizon}d" for name in CANDIDATE_NAMES]
             ].mean(axis=1)
+            previous = pd.concat(prediction_blocks) if prediction_blocks else None
+            weights = _historical_ensemble_weights(previous, horizon)
+            block[f"{WEIGHTED_ENSEMBLE_NAME}_{horizon}d"] = sum(
+                block[f"{name}_{horizon}d"] * weight
+                for name, weight in weights.items()
+            )
+            block[f"quantile_p10_{horizon}d"] = predicted_quantiles[
+                f"pred_log_return_p10_{horizon}d"
+            ]
+            block[f"quantile_p90_{horizon}d"] = predicted_quantiles[
+                f"pred_log_return_p90_{horizon}d"
+            ]
+            ensemble_weight_history.append(
+                {
+                    "block_start": str(block_dates[0].date()),
+                    "horizon_days": horizon,
+                    "weights": weights,
+                }
+            )
             block[f"random_walk_{horizon}d"] = 0.0
             block[f"carry_{horizon}d"] = np.log((1 + ibr * tau) / (1 + sofr * tau))
         prediction_blocks.append(block)
@@ -171,7 +220,7 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
     predictions.index.name = "as_of_date"
     predictions.to_csv(paths.output_root / "backtest_predictions.csv")
 
-    model_names = (*CANDIDATE_NAMES, ENSEMBLE_NAME, *BENCHMARK_NAMES)
+    model_names = (*CANDIDATE_NAMES, *ENSEMBLE_NAMES, *BENCHMARK_NAMES)
     overall_metrics: list[dict] = []
     window_metrics: list[dict] = []
     regime_metrics: list[dict] = []
@@ -181,6 +230,12 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         settings["validation"].get("minimum_positive_window_share", 0.60)
     )
     random_seed = int(settings["model"].get("random_seed", 20260715))
+    stability_window_rows = int(
+        settings["validation"].get("stability_window_rows", 125)
+    )
+    confirmation_fraction = float(
+        settings["validation"].get("confirmation_fraction", 0.20)
+    )
 
     for horizon in horizons:
         actual = predictions[f"actual_{horizon}d"]
@@ -210,24 +265,44 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             overall_metrics.append(row)
             horizon_metrics[model_name] = row
 
-            for year, dates in predictions.groupby(predictions.index.year).groups.items():
-                year_dates = pd.DatetimeIndex(dates)
-                year_random_mae = float(
+            if model_name == "quantile_boosting":
+                low = predictions[f"quantile_p10_{horizon}d"]
+                high = predictions[f"quantile_p90_{horizon}d"]
+                valid_interval = actual.notna() & low.notna() & high.notna()
+                row["quantile_interval_coverage"] = float(
+                    ((actual.loc[valid_interval] >= low.loc[valid_interval])
+                    & (actual.loc[valid_interval] <= high.loc[valid_interval])).mean()
+                )
+                row["quantile_interval_mean_width"] = float(
+                    (high.loc[valid_interval] - low.loc[valid_interval]).mean()
+                )
+                row["pinball_loss_p10"] = _pinball_loss(actual, low, 0.10)
+                row["pinball_loss_p90"] = _pinball_loss(actual, high, 0.90)
+
+            for window_number, window_start in enumerate(
+                range(0, len(predictions), stability_window_rows), start=1
+            ):
+                window_dates = predictions.index[
+                    window_start : window_start + stability_window_rows
+                ]
+                if len(window_dates) < 30:
+                    continue
+                window_random_mae = float(
                     _price_errors(
-                        actual.loc[year_dates],
-                        predictions.loc[year_dates, f"random_walk_{horizon}d"],
-                        spot.loc[year_dates],
+                        actual.loc[window_dates],
+                        predictions.loc[window_dates, f"random_walk_{horizon}d"],
+                        spot.loc[window_dates],
                     ).abs().mean()
                 )
                 window_metrics.append(
                     _metric_row(
                         horizon,
                         model_name,
-                        actual.loc[year_dates],
-                        predicted_return.loc[year_dates],
-                        spot.loc[year_dates],
-                        year_random_mae,
-                        period=str(year),
+                        actual.loc[window_dates],
+                        predicted_return.loc[window_dates],
+                        spot.loc[window_dates],
+                        window_random_mae,
+                        period=f"window_{window_number:03d}",
                     )
                 )
 
@@ -256,27 +331,89 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
 
         window_frame = pd.DataFrame(window_metrics)
         eligible: list[tuple[str, float]] = []
-        for model_name in (*CANDIDATE_NAMES, ENSEMBLE_NAME):
+        confirmation_rows = max(60, int(len(predictions) * confirmation_fraction))
+        selection_dates = predictions.index[:-confirmation_rows]
+        confirmation_dates = predictions.index[-confirmation_rows:]
+        for model_index, model_name in enumerate((*CANDIDATE_NAMES, *ENSEMBLE_NAMES)):
             row = horizon_metrics[model_name]
             windows = window_frame.loc[
                 window_frame["horizon_days"].eq(horizon)
                 & window_frame["model"].eq(model_name)
             ]
             positive_window_share = float(windows["skill_vs_random_walk_pct"].gt(0).mean())
-            statistically_better = bool(row["loss_difference_ci_high_cop"] < 0)
+            selection_random_errors = _price_errors(
+                actual.loc[selection_dates],
+                predictions.loc[selection_dates, f"random_walk_{horizon}d"],
+                spot.loc[selection_dates],
+            )
+            selection_random_mae = float(selection_random_errors.abs().mean())
+            selection_row = _metric_row(
+                horizon,
+                model_name,
+                actual.loc[selection_dates],
+                predictions.loc[selection_dates, f"{model_name}_{horizon}d"],
+                spot.loc[selection_dates],
+                selection_random_mae,
+                period="selection",
+            )
+            selection_errors = _price_errors(
+                actual.loc[selection_dates],
+                predictions.loc[selection_dates, f"{model_name}_{horizon}d"],
+                spot.loc[selection_dates],
+            )
+            _, selection_ci_high = _block_bootstrap_loss_difference(
+                selection_errors,
+                selection_random_errors,
+                seed=random_seed + horizon * 1000 + model_index,
+                block_size=max(20, int(np.ceil(horizon * 5 / 7))),
+            )
+            confirmation_random_mae = float(
+                _price_errors(
+                    actual.loc[confirmation_dates],
+                    predictions.loc[confirmation_dates, f"random_walk_{horizon}d"],
+                    spot.loc[confirmation_dates],
+                ).abs().mean()
+            )
+            confirmation_row = _metric_row(
+                horizon,
+                model_name,
+                actual.loc[confirmation_dates],
+                predictions.loc[confirmation_dates, f"{model_name}_{horizon}d"],
+                spot.loc[confirmation_dates],
+                confirmation_random_mae,
+                period="sealed_confirmation",
+            )
+            statistically_better = bool(selection_ci_high < 0)
+            probabilistic_calibration_passed = bool(
+                model_name != "quantile_boosting"
+                or 0.72 <= float(row.get("quantile_interval_coverage", np.nan)) <= 0.90
+            )
             qualifies = bool(
-                row["skill_vs_random_walk_pct"] >= minimum_skill
+                selection_row["skill_vs_random_walk_pct"] >= minimum_skill
                 and positive_window_share >= minimum_positive_windows
-                and row["directional_accuracy"] >= 0.45
+                and selection_row["directional_accuracy"] >= 0.45
                 and statistically_better
+                and confirmation_row["skill_vs_random_walk_pct"] > 0
+                and confirmation_row["directional_accuracy"] >= 0.45
+                and probabilistic_calibration_passed
             )
             row["positive_window_share"] = positive_window_share
             row["statistically_better"] = statistically_better
+            row["selection_skill_pct"] = selection_row["skill_vs_random_walk_pct"]
+            row["confirmation_skill_pct"] = confirmation_row["skill_vs_random_walk_pct"]
+            row["confirmation_directional_accuracy"] = confirmation_row[
+                "directional_accuracy"
+            ]
+            row["probabilistic_calibration_passed"] = probabilistic_calibration_passed
             row["qualifies"] = qualifies
             if qualifies:
-                eligible.append((model_name, row["skill_vs_random_walk_pct"]))
+                eligible.append((model_name, selection_row["skill_vs_random_walk_pct"]))
 
-        selected_model = max(eligible, key=lambda item: item[1])[0] if eligible else "random_walk"
+        selected_model = (
+            max(eligible, key=lambda item: item[1])[0]
+            if eligible
+            else "random_walk"
+        )
         selected_prediction = predictions[f"{selected_model}_{horizon}d"]
         residuals = (actual - selected_prediction).dropna()
         calibration_end = max(30, int(len(residuals) * 0.70))
@@ -290,6 +427,8 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             "selected_model": selected_model,
             "fallback_used": selected_model == "random_walk",
             "metrics": horizon_metrics[selected_model],
+            "ensemble_weights": _historical_ensemble_weights(predictions, horizon),
+            "sealed_confirmation_rows": int(confirmation_rows),
             "calibration": {
                 "observations": int(len(calibration_residuals)),
                 "coverage_test_observations": int(len(coverage_residuals)),
@@ -314,6 +453,7 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "method": "purged expanding-window challenger selection",
         "horizons": registry,
+        "ensemble_weight_history": ensemble_weight_history,
     }
     (paths.output_root / "champion_registry.json").write_text(
         json.dumps(registry_payload, indent=2), encoding="utf-8"
@@ -327,6 +467,10 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
         "design": f"purged expanding-window; {step}-observation refit blocks",
         "test_rows": test_rows,
         "purge_calendar_days": max(horizons),
+        "stability_window_rows": stability_window_rows,
+        "sealed_confirmation_fraction": confirmation_fraction,
+        "point_in_time_capture_active": True,
+        "historical_vintage_complete": False,
         "point_forecast_validation_passed": candidate_selected_all,
         "operational_forecast_valid": True,
         "academic_ready": False,
@@ -334,7 +478,8 @@ def run_backtest(project_root: str | Path | None = None) -> pd.DataFrame:
             horizon: item["selected_model"] for horizon, item in registry.items()
         },
         "academic_blockers": [
-            "No existe una base point-in-time de vintages para las series macroeconómicas revisables.",
+            "La captura point-in-time ya está activa, pero su historia comienza "
+            "con el primer snapshot guardado y aún no cubre toda la muestra retrospectiva.",
             "Se requiere validación externa en una muestra completamente sellada.",
             "No se dispone aún de NDF, opciones, CDS ni flujos de mercado.",
         ],

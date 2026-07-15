@@ -115,7 +115,13 @@ def _elastic_net_driver_table(model, latest: pd.DataFrame, spot: float) -> pd.Da
     return pd.DataFrame(rows, columns=DRIVER_COLUMNS)
 
 
-def _candidate_prediction(model, values: pd.DataFrame, name: str, horizon: int) -> float:
+def _candidate_prediction(
+    model,
+    values: pd.DataFrame,
+    name: str,
+    horizon: int,
+    weights: dict[str, float] | None = None,
+) -> float:
     if name == "ensemble_equal":
         return float(
             np.mean(
@@ -123,6 +129,19 @@ def _candidate_prediction(model, values: pd.DataFrame, name: str, horizon: int) 
                     pipelines[horizon].predict(values[model.feature_names])[0]
                     for pipelines in model.models.values()
                 ]
+            )
+        )
+    if name == "ensemble_weighted":
+        weights = weights or {
+            model_name: 1 / len(model.models) for model_name in model.models
+        }
+        return float(
+            sum(
+                float(weight)
+                * model.models[model_name][horizon].predict(
+                    values[model.feature_names]
+                )[0]
+                for model_name, weight in weights.items()
             )
         )
     return float(model.models[name][horizon].predict(values[model.feature_names])[0])
@@ -142,7 +161,10 @@ def _candidate_driver_table(
         model_name = selection.get("selected_model", "random_walk")
         if model_name in {"random_walk", "carry"}:
             continue
-        prediction = _candidate_prediction(model, latest, model_name, horizon)
+        weights = selection.get("ensemble_weights")
+        prediction = _candidate_prediction(
+            model, latest, model_name, horizon, weights=weights
+        )
         for feature in model.feature_names:
             summary = feature_summary.get(feature, {})
             median_proxy = summary.get("median", summary.get("mean"))
@@ -151,7 +173,7 @@ def _candidate_driver_table(
             counterfactual = latest.copy()
             counterfactual.loc[:, feature] = float(median_proxy)
             counterfactual_prediction = _candidate_prediction(
-                model, counterfactual, model_name, horizon
+                model, counterfactual, model_name, horizon, weights=weights
             )
             contribution = prediction - counterfactual_prediction
             raw_value = latest.iloc[0][feature]
@@ -260,6 +282,12 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
             candidate_predictions = (
                 model.predict_all(latest).iloc[0] if hasattr(model, "predict_all") else None
             )
+            quantile_predictions = (
+                model.predict_quantiles(latest).iloc[0]
+                if hasattr(model, "predict_quantiles")
+                and getattr(model, "quantile_models", None)
+                else None
+            )
             legacy_predictions = (
                 model.predict_log_returns(latest).iloc[0]
                 if candidate_predictions is None
@@ -293,6 +321,17 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
                             ]
                         )
                     )
+                elif selected_model == "ensemble_weighted":
+                    weights = selection.get("ensemble_weights", {})
+                    log_return = float(
+                        sum(
+                            float(weight)
+                            * candidate_predictions[
+                                f"{name}_pred_log_return_{horizon}d"
+                            ]
+                            for name, weight in weights.items()
+                        )
+                    )
                 else:
                     log_return = float(
                         candidate_predictions[
@@ -307,6 +346,13 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
                 if radius is not None:
                     output.loc[index, "p10"] = spot * np.exp(log_return - float(radius))
                     output.loc[index, "p90"] = spot * np.exp(log_return + float(radius))
+                if selected_model == "quantile_boosting" and quantile_predictions is not None:
+                    output.loc[index, "p10"] = spot * np.exp(
+                        float(quantile_predictions[f"pred_log_return_p10_{horizon}d"])
+                    )
+                    output.loc[index, "p90"] = spot * np.exp(
+                        float(quantile_predictions[f"pred_log_return_p90_{horizon}d"])
+                    )
                 residuals = np.asarray(calibration.get("residuals", []), dtype=float)
                 if residuals.size:
                     output.loc[index, "probability_up"] = float(

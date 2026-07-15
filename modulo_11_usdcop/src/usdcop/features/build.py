@@ -69,11 +69,53 @@ def engineer_market_features(
             features[f"{column}_slow_z"] = (numeric - rolling.mean()) / rolling.std()
     if "trm" in panel:
         log_return = np.log(pd.to_numeric(panel["trm"], errors="coerce")).diff()
-        features["trm_realized_vol_20"] = log_return.rolling(20, min_periods=10).std() * np.sqrt(252)
+        features["trm_return_1"] = log_return
+        features["trm_realized_vol_5"] = (
+            log_return.rolling(5, min_periods=3).std() * np.sqrt(252)
+        )
+        features["trm_realized_vol_20"] = (
+            log_return.rolling(20, min_periods=10).std() * np.sqrt(252)
+        )
+        features["trm_realized_vol_60"] = (
+            log_return.rolling(60, min_periods=30).std() * np.sqrt(252)
+        )
         features["trm_momentum_5"] = np.log(panel["trm"]).diff(5)
         features["trm_momentum_20"] = np.log(panel["trm"]).diff(20)
+        features["trm_momentum_60"] = np.log(panel["trm"]).diff(60)
     if {"ibr_on", "sofr"}.issubset(panel.columns):
         features["carry_spread_pp"] = panel["ibr_on"] - panel["sofr"]
         if "trm_realized_vol_20" in features:
-            features["carry_to_risk"] = features["carry_spread_pp"] / features["trm_realized_vol_20"].replace(0, np.nan)
+            features["carry_to_risk"] = features["carry_spread_pp"] / features[
+                "trm_realized_vol_20"
+            ].replace(0, np.nan)
+    if {"tes_cop_10y", "tes_cop_1y"}.issubset(panel.columns):
+        features["tes_slope_10y_1y_pp"] = panel["tes_cop_10y"] - panel["tes_cop_1y"]
+    if {"tes_cop_10y", "tes_cop_5y", "tes_cop_1y"}.issubset(panel.columns):
+        features["tes_curvature_pp"] = (
+            2 * panel["tes_cop_5y"] - panel["tes_cop_1y"] - panel["tes_cop_10y"]
+        )
+    if {"treasury_10y", "treasury_2y"}.issubset(panel.columns):
+        features["treasury_slope_10y_2y_pp"] = (
+            panel["treasury_10y"] - panel["treasury_2y"]
+        )
+    if {"tes_cop_10y", "treasury_10y"}.issubset(panel.columns):
+        features["sovereign_rate_spread_10y_pp"] = (
+            panel["tes_cop_10y"] - panel["treasury_10y"]
+        )
+    if {"tes_cop_1y", "treasury_2y"}.issubset(panel.columns):
+        features["sovereign_rate_spread_short_pp"] = (
+            panel["tes_cop_1y"] - panel["treasury_2y"]
+        )
+    if {"policy_rate", "sofr"}.issubset(panel.columns):
+        features["policy_rate_spread_pp"] = panel["policy_rate"] - panel["sofr"]
+    if {"vix", "broad_usd"}.issubset(panel.columns):
+        vix_z = features.get("vix_z_60")
+        usd_z = features.get("broad_usd_z_60")
+        if vix_z is not None and usd_z is not None:
+            features["global_risk_usd_interaction"] = vix_z * usd_z
+    if {"brent", "broad_usd"}.issubset(panel.columns):
+        features["brent_usd_20d_interaction"] = (
+            np.log(pd.to_numeric(panel["brent"], errors="coerce")).diff(20)
+            * np.log(pd.to_numeric(panel["broad_usd"], errors="coerce")).diff(20)
+        )
     return features.replace([np.inf, -np.inf], np.nan)
