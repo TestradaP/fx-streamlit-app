@@ -1,0 +1,12 @@
+{
+  "evaluated_features": 75,
+  "outside_training_range": [
+    "reserves_level",
+    "current_account_release_change",
+    "carry_spread_pp"
+  ],
+  "missing_features": [],
+  "outside_ratio": 0.04,
+  "severe": false,
+  "generated_at": "2026-07-15T20:42:11.242065+00:00"
+}

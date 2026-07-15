@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .env
 .streamlit/secrets.toml
+modulo_11_usdcop/outputs/candidate_models_20*.joblib
+modulo_11_usdcop/outputs/elastic_net_20*.joblib
+modulo_11_usdcop/outputs/model_metadata_20*.json

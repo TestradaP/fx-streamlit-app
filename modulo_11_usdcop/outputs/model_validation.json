@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-07-15T20:40:08.479524+00:00",
+  "design": "purged expanding-window; 100-observation refit blocks",
+  "test_rows": 500,
+  "purge_calendar_days": 60,
+  "point_forecast_validation_passed": false,
+  "operational_forecast_valid": true,
+  "academic_ready": false,
+  "selected_models": {
+    "15": "random_walk",
+    "30": "random_walk",
+    "45": "random_walk",
+    "60": "random_walk"
+  },
+  "academic_blockers": [
+    "No existe una base point-in-time de vintages para las series macroecon\u00f3micas revisables.",
+    "Se requiere validaci\u00f3n externa en una muestra completamente sellada.",
+    "No se dispone a\u00fan de NDF, opciones, CDS ni flujos de mercado."
+  ]
+}

@@ -6,6 +6,16 @@ import numpy as np
 import pandas as pd
 
 
+def apply_availability_lag(frame: pd.DataFrame, lag_days: int = 0) -> pd.DataFrame:
+    """Move observations to the first business day when they are assumed available."""
+    adjusted = frame.copy()
+    dates = pd.to_datetime(adjusted["observation_date"]) + pd.to_timedelta(
+        int(lag_days), unit="D"
+    )
+    adjusted["observation_date"] = dates + pd.offsets.BDay(0)
+    return adjusted
+
+
 def build_daily_panel(
     named_series: Mapping[str, pd.DataFrame],
     *,
@@ -28,18 +38,35 @@ def build_daily_panel(
     return panel.reindex(index).rename_axis("date")
 
 
-def engineer_market_features(panel: pd.DataFrame) -> pd.DataFrame:
-    features = panel.copy()
+def engineer_market_features(
+    panel: pd.DataFrame,
+    frequencies: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Build transformations appropriate to each series' publication frequency."""
+    frequencies = frequencies or {}
+    features = pd.DataFrame(index=panel.index)
     for column in list(panel.columns):
         numeric = pd.to_numeric(panel[column], errors="coerce")
         features[f"{column}_level"] = numeric
-        features[f"{column}_chg_1"] = numeric.diff(1)
-        features[f"{column}_pct_1"] = numeric.pct_change(1)
-        features[f"{column}_pct_5"] = numeric.pct_change(5)
-        features[f"{column}_z_60"] = (
-            (numeric - numeric.rolling(60, min_periods=20).mean())
-            / numeric.rolling(60, min_periods=20).std()
-        )
+        frequency = str(frequencies.get(column, "daily")).lower()
+        if frequency == "daily":
+            features[f"{column}_chg_1"] = numeric.diff(1)
+            features[f"{column}_pct_1"] = numeric.pct_change(1, fill_method=None)
+            features[f"{column}_pct_5"] = numeric.pct_change(5, fill_method=None)
+            rolling = numeric.rolling(60, min_periods=20)
+            features[f"{column}_z_60"] = (numeric - rolling.mean()) / rolling.std()
+        else:
+            changed = numeric.diff().where(numeric.diff().ne(0))
+            features[f"{column}_release_change"] = changed.ffill(limit=260)
+            update_marker = numeric.ne(numeric.shift()) & numeric.notna()
+            groups = update_marker.cumsum()
+            features[f"{column}_days_since_update"] = (
+                numeric.groupby(groups).cumcount().where(numeric.notna())
+            )
+            window = 756 if "quarter" in frequency else 252
+            minimum = 252 if "quarter" in frequency else 60
+            rolling = numeric.rolling(window, min_periods=minimum)
+            features[f"{column}_slow_z"] = (numeric - rolling.mean()) / rolling.std()
     if "trm" in panel:
         log_return = np.log(pd.to_numeric(panel["trm"], errors="coerce")).diff()
         features["trm_realized_vol_20"] = log_return.rolling(20, min_periods=10).std() * np.sqrt(252)

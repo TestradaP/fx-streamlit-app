@@ -4,6 +4,10 @@ day_count_basis: 360
 minimum_training_rows: 750
 validation:
   minimum_test_rows: 180
+  backtest_rows: 500
+  refit_block_rows: 100
+  minimum_skill_pct: 2.0
+  minimum_positive_window_share: 0.60
   rolling_error_window: 120
   interval_coverage: [0.50, 0.80, 0.90]
 storage:

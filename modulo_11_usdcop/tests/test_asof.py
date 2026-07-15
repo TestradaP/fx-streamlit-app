@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from usdcop.features.asof import asof_join
+from usdcop.features.build import apply_availability_lag
 
 
 class AsOfJoinTests(unittest.TestCase):
@@ -20,6 +21,13 @@ class AsOfJoinTests(unittest.TestCase):
         self.assertEqual(joined.loc[0, "remittances"], 100.0)
         self.assertEqual(joined.loc[1, "remittances"], 110.0)
         self.assertTrue((joined.release_timestamp <= joined.as_of_timestamp).all())
+
+    def test_availability_lag_rolls_weekend_to_next_business_day(self):
+        frame = pd.DataFrame({"observation_date": ["2026-07-10"], "value": [1.0]})
+
+        adjusted = apply_availability_lag(frame, lag_days=1)
+
+        self.assertEqual(adjusted.loc[0, "observation_date"], pd.Timestamp("2026-07-13"))
 
 
 if __name__ == "__main__":

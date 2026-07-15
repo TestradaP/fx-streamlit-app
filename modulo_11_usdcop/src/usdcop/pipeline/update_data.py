@@ -28,7 +28,13 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             continue
         try:
             frame = banrep.fetch_series(item["series_id"], latest_n=10000)
-            quality = assess_series(frame, datetime.now().date(), int(item.get("max_staleness_days", 30)))
+            quality = assess_series(
+                frame,
+                datetime.now().date(),
+                int(item.get("max_staleness_days", 30)),
+                item.get("expected_min"),
+                item.get("expected_max"),
+            )
             details["quality"].append({"series": item["name"], **quality.__dict__})
             if not quality.passed:
                 raise ValueError(f"quality check failed: {', '.join(quality.messages)}")
@@ -44,7 +50,13 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             continue
         try:
             frame = fred.fetch_series(item["series_id"])
-            quality = assess_series(frame, datetime.now().date(), int(item.get("max_staleness_days", 30)))
+            quality = assess_series(
+                frame,
+                datetime.now().date(),
+                int(item.get("max_staleness_days", 30)),
+                item.get("expected_min"),
+                item.get("expected_max"),
+            )
             details["quality"].append({"series": item["name"], **quality.__dict__})
             if not quality.passed:
                 raise ValueError(f"quality check failed: {', '.join(quality.messages)}")

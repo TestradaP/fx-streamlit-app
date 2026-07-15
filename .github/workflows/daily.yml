@@ -5,6 +5,7 @@ on:
   schedule:
     - cron: "15 11 * * 1-5"  # 06:15 America/Bogota
     - cron: "15 22 * * 1-5"  # 17:15 America/Bogota
+    - cron: "15 12 * * 6"    # Saturday weekly challenger retraining
 
 permissions:
   contents: write
@@ -32,6 +33,10 @@ jobs:
         env:
           # Configure this as a repository secret; it is never stored in source.
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      - name: Retrain weekly challengers
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '15 12 * * 6'
+        run: python modulo_11_usdcop/scripts/train_models.py
+      - run: python modulo_11_usdcop/scripts/run_backtest.py
       - run: python modulo_11_usdcop/scripts/run_forecast.py
       - uses: actions/upload-artifact@v4
         with:
@@ -49,6 +54,16 @@ jobs:
           git add modulo_11_usdcop/outputs/forecast_drivers.csv
           git add modulo_11_usdcop/outputs/forecast_status.json
           git add modulo_11_usdcop/outputs/data_quality_latest.json
+          git add modulo_11_usdcop/outputs/backtest_metrics.csv
+          git add modulo_11_usdcop/outputs/backtest_predictions.csv
+          git add modulo_11_usdcop/outputs/backtest_window_metrics.csv
+          git add modulo_11_usdcop/outputs/backtest_regime_metrics.csv
+          git add modulo_11_usdcop/outputs/champion_registry.json
+          git add modulo_11_usdcop/outputs/model_validation.json
+          git add modulo_11_usdcop/outputs/model_monitor.json
+          git add modulo_11_usdcop/outputs/champion_model.txt
+          git add modulo_11_usdcop/outputs/candidate_models_latest.joblib
+          git add modulo_11_usdcop/outputs/model_metadata_latest.json
           if git diff --cached --quiet; then
             echo "Forecast files are already current."
             exit 0

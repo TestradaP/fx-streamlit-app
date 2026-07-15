@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -62,6 +63,18 @@ class ForecastRuntimeTests(unittest.TestCase):
         self.assertEqual(_driver_group("carry_spread_pp"), "rates_and_carry")
         self.assertEqual(_driver_group("current_account_balance"), "external_flows")
         self.assertEqual(_driver_group("trm_return_5d"), "technical_fx")
+
+    def test_forecaster_uses_time_ordered_cross_validation(self):
+        from usdcop.models.direct import DirectElasticNetForecaster
+
+        X = pd.DataFrame({"feature": np.linspace(-1, 1, 120)})
+        targets = pd.DataFrame(
+            {"target_log_return_15d": 0.01 * X["feature"]}, index=X.index
+        )
+
+        fitted = DirectElasticNetForecaster((15,)).fit(X, targets)
+
+        self.assertIsInstance(fitted.models[15].named_steps["model"].cv, TimeSeriesSplit)
 
 
 if __name__ == "__main__":

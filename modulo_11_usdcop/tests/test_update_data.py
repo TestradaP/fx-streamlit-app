@@ -20,6 +20,22 @@ class UpdateDataQualityTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("future", result.messages[0])
 
+    def test_implausible_latest_value_fails_quality(self):
+        frame = pd.DataFrame(
+            {"observation_date": [pd.Timestamp("2026-07-15")], "value": [50000.0]}
+        )
+
+        result = assess_series(
+            frame,
+            pd.Timestamp("2026-07-15").date(),
+            5,
+            expected_min=1000,
+            expected_max=10000,
+        )
+
+        self.assertFalse(result.passed)
+        self.assertIn("above expected maximum", result.messages[0])
+
     def test_failed_quality_does_not_persist_series(self):
         stale_frame = pd.DataFrame(
             {

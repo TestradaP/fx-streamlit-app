@@ -6,7 +6,14 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from usdcop.ui.module import _forecast_review_id, _load_drivers, _load_quality_snapshot
+from usdcop.ui.module import (
+    _forecast_review_id,
+    _load_drivers,
+    _load_monitor,
+    _load_quality_snapshot,
+    _load_registry,
+    _load_validation,
+)
 
 
 class DailyReviewTests(unittest.TestCase):
@@ -46,6 +53,37 @@ class DailyReviewTests(unittest.TestCase):
             actual = _load_drivers(SimpleNamespace(output_root=output_root))
 
         pd.testing.assert_frame_equal(actual, expected)
+
+    def test_loads_model_validation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_root = Path(temporary_directory)
+            expected = {"point_forecast_validation_passed": False}
+            (output_root / "model_validation.json").write_text(
+                json.dumps(expected), encoding="utf-8"
+            )
+
+            actual = _load_validation(SimpleNamespace(output_root=output_root))
+
+        self.assertEqual(actual, expected)
+
+    def test_loads_registry_and_monitor(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_root = Path(temporary_directory)
+            registry = {"horizons": {"15": {"selected_model": "random_walk"}}}
+            monitor = {"severe": False, "outside_ratio": 0.02}
+            (output_root / "champion_registry.json").write_text(
+                json.dumps(registry), encoding="utf-8"
+            )
+            (output_root / "model_monitor.json").write_text(
+                json.dumps(monitor), encoding="utf-8"
+            )
+
+            paths = SimpleNamespace(output_root=output_root)
+            actual_registry = _load_registry(paths)
+            actual_monitor = _load_monitor(paths)
+
+        self.assertEqual(actual_registry, registry)
+        self.assertEqual(actual_monitor, monitor)
 
 
 if __name__ == "__main__":

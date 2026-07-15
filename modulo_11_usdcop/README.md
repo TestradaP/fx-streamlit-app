@@ -22,6 +22,7 @@ copy .env.example .env
 
 python scripts/update_daily.py
 python scripts/train_models.py
+python scripts/run_backtest.py
 python scripts/run_forecast.py
 streamlit run pages/11_USD_COP.py
 ```
@@ -55,7 +56,8 @@ El repositorio contiene un snapshot oficial al 15 de julio de 2026 y una tabla d
 
 - Banco de la Republica / SUAMECA: TRM, IBR, tasa de politica, TES, reservas, cuenta corriente y otras series.
 - DANE: balanza comercial y estadisticas de comercio exterior.
-- FRED: SOFR, VIX, indice amplio del dolar, tasas del Tesoro y petroleo.
+- FRED: SOFR, VIX, indice amplio del dolar, tasas del Tesoro, petroleo y
+  condiciones financieras NFCI.
 - Fuente de mercado opcional: NDF ejecutable, volatilidad implicita, risk reversals, CDS y order flow.
 
 La API REST de SUAMECA usada por el conector es publica pero no esta documentada como contrato estable. En produccion se debe habilitar tambien un adaptador de respaldo para SDMX o descarga oficial por archivo.
@@ -66,18 +68,42 @@ El flujo recomendado es:
 
 1. `update_daily.py`: descarga y valida datos.
 2. `train_models.py`: reentrena segun calendario, no en cada carga de pagina.
-3. `run_forecast.py`: calcula benchmarks, pronosticos e intervalos.
-4. Streamlit lee artefactos versionados de una base persistente.
+3. `run_backtest.py`: compara challengers con benchmarks y publica el registro champion.
+4. `run_forecast.py`: aplica el método aceptado, intervalos y monitoreo de deriva.
+5. Streamlit lee artefactos versionados de una base persistente.
 
 El workflow incluido publica `outputs/latest_forecasts.csv`,
-`outputs/forecast_drivers.csv` y `outputs/forecast_status.json`, junto con
-`outputs/data_quality_latest.json`, en la rama `main` después de una ejecución
-correcta. Streamlit Community Cloud detecta ese commit y actualiza la aplicación.
-El usuario revisa este control en "Frescura y gobierno" y aprueba el pronóstico
-exacto para su sesión. La pestaña "Drivers" muestra la descomposición ElasticNet
-por variable y por grupo para cada horizonte.
+`outputs/forecast_drivers.csv`, `outputs/backtest_metrics.csv`,
+`outputs/backtest_predictions.csv`, métricas por ventana y régimen,
+`outputs/champion_registry.json`, `outputs/model_monitor.json`,
+`outputs/model_validation.json` y
+`outputs/forecast_status.json`, junto con `outputs/data_quality_latest.json`, en la
+rama `main` después de una ejecución correcta. Streamlit Community Cloud detecta
+ese commit y actualiza la aplicación. El usuario revisa la calidad de los datos en
+"Frescura y gobierno"; esta revisión no equivale a aprobar estadísticamente el
+modelo. La pestaña "Drivers" muestra la descomposición ElasticNet por variable y
+por grupo para cada horizonte.
 Los Parquet y SQLite completos se conservan como artifacts de GitHub Actions para
 evitar aumentar innecesariamente el historial Git.
+
+## Estado de validación académica
+
+El dashboard separa explícitamente el pronóstico experimental de su validación.
+Un modelo solo puede considerarse candidato para conclusiones confirmatorias si
+supera los benchmarks fuera de muestra, demuestra estabilidad por régimen y
+calibra sus intervalos. La validación actual usa ventanas expansivas, purga de 60
+días y selección temporal de hiperparámetros. Las series mensuales, trimestrales y
+FRED reciben rezagos conservadores de disponibilidad; aun así, para investigación
+académica definitiva se requiere una base histórica point-in-time con vintages.
+
+Los challengers incluidos son ElasticNet, Ridge, Huber, gradient boosting y Ridge
+por régimen VIX, además de un ensamble simple. La selección usa 500 observaciones fuera de muestra, ventanas
+expansivas con purga, estabilidad anual, regímenes VIX y un intervalo de confianza
+block-bootstrap. Si ninguno cumple, el método publicado vuelve automáticamente a
+spot sin cambio. Los intervalos P10-P90 se calibran con residuos fuera de muestra.
+
+El workflow puntúa y valida dos veces por día hábil. Los challengers se reentrenan
+los sábados y en ejecuciones manuales; el scoring diario no reentrena innecesariamente.
 
 Para un despliegue multiusuario use PostgreSQL u object storage. El almacenamiento local incluido (Parquet + SQLite) es apropiado para desarrollo y un MVP controlado.
 

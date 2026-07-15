@@ -2215,9 +2215,9 @@ def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
         
     try:
         from usdcop.ui import module as ui_module
-        
+
         if hasattr(ui_module, 'render_module'):
-            ui_module.render_module()
+            ui_module.render_module(ruta_mod_11)
         elif hasattr(ui_module, 'render_ui'):
             ui_module.render_ui()
         elif hasattr(ui_module, 'main'):

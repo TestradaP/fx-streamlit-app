@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNetCV
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
 
@@ -35,9 +36,9 @@ class DirectElasticNetForecaster:
                         "model",
                         ElasticNetCV(
                             l1_ratio=[0.05, 0.15, 0.35, 0.65, 0.9],
-                            alphas=np.logspace(-5, -1, 30),
-                            cv=5,
-                            max_iter=20000,
+                            alphas=np.logspace(-4, -1, 25),
+                            cv=TimeSeriesSplit(n_splits=5),
+                            max_iter=50000,
                             random_state=self.random_state,
                         ),
                     ),

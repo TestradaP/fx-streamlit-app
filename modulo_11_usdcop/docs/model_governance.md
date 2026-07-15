@@ -24,6 +24,13 @@ Apoyar decisiones de caja y cobertura, no maximizar utilidad especulativa. La fu
 
 El champion solo cambia cuando el challenger supera los benchmarks en varias ventanas, mantiene cobertura probabilistica y pasa revision humana. Cada artefacto debe guardar version de codigo, datos, hiperparametros, metricas y aprobacion.
 
+La implementación evalúa ElasticNet, Ridge, Huber, gradient boosting, Ridge por
+régimen VIX y un ensamble
+igualitario. Cada horizonte se decide por separado. La promoción automática exige
+skill mínimo, dirección, mayoría de ventanas positivas y límite superior negativo
+del intervalo block-bootstrap de la diferencia de error. Si no se cumplen todas las
+reglas, el registro selecciona `random_walk` como fallback operativo.
+
 ## Politica de salida
 
 - `BENCHMARK_ONLY_NOT_TRAINED`: solo spot y carry.
@@ -34,7 +41,15 @@ El champion solo cambia cuando el challenger supera los benchmarks en varias ven
 ## Revisión operativa diaria
 
 La selección y frescura de las fuentes se validan automáticamente en cada ejecución.
-La interfaz permite que el usuario autenticado revise el snapshot publicado y apruebe
-el pronóstico exacto dentro de su sesión. La aprobación queda invalidada cuando cambia
+La interfaz permite que el usuario autenticado revise el snapshot publicado y confirme
+la revisión de los datos dentro de su sesión. La confirmación queda invalidada cuando cambia
 la fecha de generación, la versión del modelo o la fecha de corte. Esta revisión diaria
-no reentrena ni cambia el modelo champion.
+no reentrena, no cambia el modelo champion y no constituye aprobación estadística.
+
+## Criterio académico
+
+La etiqueta de uso académico confirmatorio permanece deshabilitada mientras falte
+cualquiera de estos elementos: datos point-in-time con vintages, superioridad consistente
+frente a spot sin cambio y carry, estabilidad por régimen y cobertura fuera de muestra de
+intervalos probabilísticos. Los valores que no cumplan estos criterios se publican únicamente
+como resultados experimentales reproducibles.
