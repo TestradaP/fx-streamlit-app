@@ -1,38 +1,51 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from usdcop.config import resolve_paths
-from usdcop.data.repository import SeriesRepository
 from usdcop.ui.charts import forecast_chart
 
 
+AUTOMATED_MODEL_STATUSES = {
+    "MODEL_ACTIVE_AUTOMATED_DAILY",
+    "MODEL_TRAINED_PENDING_FORMAL_APPROVAL",  # Legacy published forecast.
+}
+
+
 def _load_forecast(paths) -> pd.DataFrame:
-    from pathlib import Path
-    
-    # 1. Encontrar la raíz de 'modulo_11_usdcop'
-    # Subimos 4 niveles (padre de src/ que es index parents[3])
-    raiz_modulo = Path(__file__).resolve().parents[3]
-    
-    # 2. Definir las rutas físicas absolutas
-    live = raiz_modulo / "outputs" / "latest_forecasts.csv"
-    reference = raiz_modulo / "data" / "reference" / "benchmark_forecasts_2026-07-15.csv"
-    
-    # 3. Cargar el archivo que esté disponible
+    live = paths.output_root / "latest_forecasts.csv"
+    reference = paths.project_root / "data" / "reference" / "benchmark_forecasts_2026-07-15.csv"
+
     if live.exists():
         return pd.read_csv(live)
-        
+
     if reference.exists():
         return pd.read_csv(reference)
-        
-    # Plan C de emergencia extrema si nada existe
+
     raise FileNotFoundError(
         f"No se encontró ningún archivo de pronósticos.\n"
         f"Ruta Live buscada: {live.resolve()}\n"
         f"Ruta Reference buscada: {reference.resolve()}"
+    )
+
+
+def _load_quality_snapshot(paths) -> dict | None:
+    snapshot_path = paths.output_root / "data_quality_latest.json"
+    if not snapshot_path.exists():
+        return None
+    value = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else None
+
+
+def _forecast_review_id(forecast: pd.DataFrame) -> str:
+    first = forecast.iloc[0]
+    return "|".join(
+        str(first.get(column, ""))
+        for column in ("generated_at", "model_version", "as_of_date")
     )
 
 
@@ -48,14 +61,25 @@ def render_module(project_root: str | Path | None = None) -> None:
     st.caption("Soporte probabilistico para caja y coberturas. No constituye recomendacion de inversion.")
 
     forecast = _load_forecast(paths)
+    quality_snapshot = _load_quality_snapshot(paths)
     status = str(forecast.get("status", pd.Series(["UNKNOWN"])).iloc[0])
+    review_id = _forecast_review_id(forecast)
+    approval = st.session_state.get("usdcop_daily_approval", {})
+    is_daily_approved = approval.get("forecast_id") == review_id
     if status == "BENCHMARK_ONLY_NOT_TRAINED":
         st.warning(
             "Modo benchmark: se muestran spot y ancla teorica de carry. "
             "No hay una salida de modelo aprobada; la interfaz no rellena valores faltantes."
         )
-    elif "PENDING" in status:
-        st.info(f"Estado del modelo: {status}. Revise el tab de gobierno antes de uso operativo.")
+    elif status in AUTOMATED_MODEL_STATUSES and is_daily_approved:
+        st.success("Pronóstico diario revisado y aprobado para uso en esta sesión.")
+    elif status in AUTOMATED_MODEL_STATUSES:
+        st.warning(
+            "Pronóstico automático disponible, pendiente de su revisión diaria de datos. "
+            "Apruébelo en Frescura y gobierno antes de usarlo."
+        )
+    elif status.startswith("BENCHMARK_ONLY"):
+        st.warning(f"Estado del pronóstico: {status}")
     else:
         st.success(f"Estado del modelo: {status}")
 
@@ -68,6 +92,8 @@ def render_module(project_root: str | Path | None = None) -> None:
 
     tabs = st.tabs(["Pronostico", "Drivers", "Backtest", "Escenarios", "Frescura y gobierno"])
     with tabs[0]:
+        if status in AUTOMATED_MODEL_STATUSES and not is_daily_approved:
+            st.info("Vista preliminar: los valores todavía no tienen su aprobación diaria.")
         st.plotly_chart(forecast_chart(forecast), use_container_width=True)
         display_columns = [
             column for column in [
@@ -105,13 +131,73 @@ def render_module(project_root: str | Path | None = None) -> None:
 
     with tabs[4]:
         st.subheader("Frescura de datos y gobierno")
-        repository = SeriesRepository(paths.storage_root)
-        registry = repository.registry()
-        if registry.empty:
-            st.warning("No hay series persistidas en el store local. Ejecute scripts/update_daily.py.")
+        if quality_snapshot:
+            st.caption(f"Control generado: {quality_snapshot.get('generated_at', 'N/D')}")
+            quality_rows = pd.DataFrame(quality_snapshot.get("quality", []))
+            if quality_rows.empty:
+                st.warning("El control diario no contiene series evaluadas.")
+            else:
+                if "messages" in quality_rows:
+                    quality_rows["messages"] = quality_rows["messages"].apply(
+                        lambda value: ", ".join(value) if isinstance(value, list) else str(value or "")
+                    )
+                columns = [
+                    column
+                    for column in ("series", "passed", "rows", "age_days", "messages")
+                    if column in quality_rows
+                ]
+                st.dataframe(quality_rows[columns], use_container_width=True, hide_index=True)
+
+            optional_failures = quality_snapshot.get("failed", [])
+            if optional_failures:
+                st.warning(
+                    "Fuentes opcionales no disponibles: "
+                    + ", ".join(str(item.get("series", "unknown")) for item in optional_failures)
+                )
         else:
-            st.dataframe(registry, use_container_width=True, hide_index=True)
+            st.warning(
+                "Aún no existe el control de calidad publicado. Ejecute el workflow diario actualizado."
+            )
+
+        required_failures = [
+            item
+            for item in (quality_snapshot or {}).get("failed", [])
+            if not str(item.get("series", "")).startswith("dane:")
+        ]
+        quality_ready = bool(quality_snapshot) and not required_failures
+        model_ready = status in AUTOMATED_MODEL_STATUSES and forecast["median"].notna().all()
+
+        st.markdown("#### Aprobación diaria")
+        if is_daily_approved:
+            st.success(
+                f"Aprobado por {approval.get('reviewer', 'usuario')} "
+                f"el {approval.get('approved_at', 'N/D')}."
+            )
+            if st.button("Revocar aprobación de esta sesión"):
+                st.session_state.pop("usdcop_daily_approval", None)
+                st.rerun()
+        else:
+            reviewed = st.checkbox(
+                "Confirmo que revisé la selección, frescura y alertas de los datos.",
+                disabled=not (quality_ready and model_ready),
+            )
+            if st.button(
+                "Aprobar pronóstico diario",
+                type="primary",
+                disabled=not (quality_ready and model_ready and reviewed),
+            ):
+                st.session_state.usdcop_daily_approval = {
+                    "forecast_id": review_id,
+                    "reviewer": st.session_state.get("authenticated_user", "usuario"),
+                    "approved_at": pd.Timestamp.now(tz="UTC").isoformat(),
+                }
+                st.rerun()
+            if not quality_ready:
+                st.caption("La aprobación se habilita cuando el control diario no tiene fallas requeridas.")
+            elif not model_ready:
+                st.caption("La aprobación se habilita cuando el pronóstico automático contiene medianas.")
+
         st.markdown(
-            "**Controles minimos:** fechas de publicacion, vintages, alertas de rezago, "
-            "version del modelo, champion/challenger, aprobacion humana y bitacora de cambios."
+            "La aprobación corresponde únicamente al pronóstico publicado y a esta sesión. "
+            "Un nuevo pronóstico diario requiere una nueva revisión."
         )

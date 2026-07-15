@@ -27,6 +27,14 @@ El champion solo cambia cuando el challenger supera los benchmarks en varias ven
 ## Politica de salida
 
 - `BENCHMARK_ONLY_NOT_TRAINED`: solo spot y carry.
-- `MODEL_TRAINED_PENDING_FORMAL_APPROVAL`: modelo tecnico visible para analistas, no para decision operativa automatica.
+- `MODEL_ACTIVE_AUTOMATED_DAILY`: modelo activo para generar el pronostico diario.
 - `APPROVED_FOR_DECISION_SUPPORT`: aprobado para soporte, siempre con supervision humana.
 - `SUSPENDED_DATA_OR_DRIFT`: ocultar mediana del modelo y volver a benchmarks.
+
+## Revisión operativa diaria
+
+La selección y frescura de las fuentes se validan automáticamente en cada ejecución.
+La interfaz permite que el usuario autenticado revise el snapshot publicado y apruebe
+el pronóstico exacto dentro de su sesión. La aprobación queda invalidada cuando cambia
+la fecha de generación, la versión del modelo o la fecha de corte. Esta revisión diaria
+no reentrena ni cambia el modelo champion.

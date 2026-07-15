@@ -45,7 +45,8 @@ class UpdateDataQualityTests(unittest.TestCase):
         }
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            paths = SimpleNamespace(storage_root=Path(temporary_directory))
+            root = Path(temporary_directory)
+            paths = SimpleNamespace(storage_root=root, output_root=root)
             dane_summary = SimpleNamespace(
                 period_label="test",
                 deficit_usd_millions=0.0,
@@ -61,18 +62,21 @@ class UpdateDataQualityTests(unittest.TestCase):
             ):
                 dane_type.return_value.fetch_latest_summary.return_value = dane_summary
                 result = update_all()
+            snapshot_written = (root / "data_quality_latest.json").exists()
 
         repository.save_series.assert_not_called()
         self.assertEqual(result["status"], "failure")
         self.assertFalse(result["quality"][0]["passed"])
         self.assertEqual(result["failed"][0]["series"], "banrep:stale_test")
+        self.assertTrue(snapshot_written)
 
     def test_dane_failure_is_optional(self):
         repository = Mock()
         catalog = {"banrep": [], "fred": [], "dane": {}}
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            paths = SimpleNamespace(storage_root=Path(temporary_directory))
+            root = Path(temporary_directory)
+            paths = SimpleNamespace(storage_root=root, output_root=root)
             with (
                 patch("usdcop.pipeline.update_data.load_settings", return_value=(paths, {}, catalog)),
                 patch("usdcop.pipeline.update_data.SeriesRepository", return_value=repository),

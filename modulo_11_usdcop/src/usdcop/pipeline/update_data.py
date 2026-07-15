@@ -76,4 +76,13 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
     else:
         status = "success"
     repository.record_run(status, details, started_at=started)
-    return {"status": status, **details}
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        **details,
+    }
+    (paths.output_root / "data_quality_latest.json").write_text(
+        json.dumps(result, ensure_ascii=False, default=str, indent=2),
+        encoding="utf-8",
+    )
+    return result

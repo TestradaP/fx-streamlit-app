@@ -75,7 +75,7 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
                 horizon = int(row["horizon_days"])
                 log_return = float(predicted[f"pred_log_return_{horizon}d"])
                 output.loc[index, "median"] = spot * np.exp(log_return)
-            output["status"] = "MODEL_TRAINED_PENDING_FORMAL_APPROVAL"
+            output["status"] = "MODEL_ACTIVE_AUTOMATED_DAILY"
             output["model_version"] = artifact["version"]
         except Exception as exc:  # noqa: BLE001 - retain an explicit benchmark fallback
             LOGGER.exception("Champion model unavailable; emitting benchmark-only forecast")
