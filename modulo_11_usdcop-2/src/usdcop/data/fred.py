@@ -14,6 +14,10 @@ class FredClient:
     def __init__(self, timeout_seconds: int = 30) -> None:
         self.timeout_seconds = timeout_seconds
         self.session = build_session()
+        # Disfraz para evitar el bloqueo anti-bots de FRED
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
 
     def fetch_series(self, series_id: str) -> pd.DataFrame:
         response = self.session.get(
