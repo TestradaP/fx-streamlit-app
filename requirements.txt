@@ -35,4 +35,4 @@ streamlit
 pandas
 openpyxl
 gspread
--e ./modulo_11_usdcop
+./modulo_11_usdcop
