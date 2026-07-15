@@ -1,0 +1,168 @@
+{
+  "generated_at": "2026-07-15T22:12:53.534689+00:00",
+  "mode": "immutable_ingestion_snapshots",
+  "historical_vintage_complete": false,
+  "note": "Point-in-time coverage begins with the first stored snapshot; older revisions cannot be reconstructed retrospectively.",
+  "series": [
+    {
+      "source": "banrep",
+      "series_id": "current_account",
+      "vintage_rows": 105,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:44.234109+00:00",
+      "last_snapshot": "2026-07-15T22:11:44.234109+00:00",
+      "first_observation": "2000-03-31",
+      "last_observation": "2026-03-31"
+    },
+    {
+      "source": "banrep",
+      "series_id": "ibr_on",
+      "vintage_rows": 4519,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.282409+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.282409+00:00",
+      "first_observation": "2008-01-02",
+      "last_observation": "2026-07-15"
+    },
+    {
+      "source": "banrep",
+      "series_id": "inflation",
+      "vintage_rows": 852,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:44.108209+00:00",
+      "last_snapshot": "2026-07-15T22:11:44.108209+00:00",
+      "first_observation": "1955-07-31",
+      "last_observation": "2026-06-30"
+    },
+    {
+      "source": "banrep",
+      "series_id": "policy_rate",
+      "vintage_rows": 10000,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.093263+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.093263+00:00",
+      "first_observation": "1999-02-27",
+      "last_observation": "2026-07-15"
+    },
+    {
+      "source": "banrep",
+      "series_id": "reserves",
+      "vintage_rows": 798,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.455757+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.455757+00:00",
+      "first_observation": "1960-01-31",
+      "last_observation": "2026-06-30"
+    },
+    {
+      "source": "banrep",
+      "series_id": "tes_cop_10y",
+      "vintage_rows": 5722,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.955395+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.955395+00:00",
+      "first_observation": "2003-01-02",
+      "last_observation": "2026-07-10"
+    },
+    {
+      "source": "banrep",
+      "series_id": "tes_cop_1y",
+      "vintage_rows": 5722,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.605278+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.605278+00:00",
+      "first_observation": "2003-01-02",
+      "last_observation": "2026-07-10"
+    },
+    {
+      "source": "banrep",
+      "series_id": "tes_cop_5y",
+      "vintage_rows": 5722,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:43.792074+00:00",
+      "last_snapshot": "2026-07-15T22:11:43.792074+00:00",
+      "first_observation": "2003-01-02",
+      "last_observation": "2026-07-10"
+    },
+    {
+      "source": "banrep",
+      "series_id": "trm",
+      "vintage_rows": 10000,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:42.725071+00:00",
+      "last_snapshot": "2026-07-15T22:11:42.725071+00:00",
+      "first_observation": "1999-02-28",
+      "last_observation": "2026-07-15"
+    },
+    {
+      "source": "fred",
+      "series_id": "brent",
+      "vintage_rows": 9932,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:57.849576+00:00",
+      "last_snapshot": "2026-07-15T22:11:57.849576+00:00",
+      "first_observation": "1987-05-20",
+      "last_observation": "2026-07-13"
+    },
+    {
+      "source": "fred",
+      "series_id": "broad_usd",
+      "vintage_rows": 5144,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:57.624919+00:00",
+      "last_snapshot": "2026-07-15T22:11:57.624919+00:00",
+      "first_observation": "2006-01-02",
+      "last_observation": "2026-07-10"
+    },
+    {
+      "source": "fred",
+      "series_id": "financial_conditions",
+      "vintage_rows": 2897,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:12:52.336619+00:00",
+      "last_snapshot": "2026-07-15T22:12:52.336619+00:00",
+      "first_observation": "1971-01-08",
+      "last_observation": "2026-07-10"
+    },
+    {
+      "source": "fred",
+      "series_id": "sofr",
+      "vintage_rows": 2067,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:51.106362+00:00",
+      "last_snapshot": "2026-07-15T22:11:51.106362+00:00",
+      "first_observation": "2018-04-03",
+      "last_observation": "2026-07-14"
+    },
+    {
+      "source": "fred",
+      "series_id": "treasury_10y",
+      "vintage_rows": 16117,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:12:41.887091+00:00",
+      "last_snapshot": "2026-07-15T22:12:41.887091+00:00",
+      "first_observation": "1962-01-02",
+      "last_observation": "2026-07-14"
+    },
+    {
+      "source": "fred",
+      "series_id": "treasury_2y",
+      "vintage_rows": 12525,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:12:41.468071+00:00",
+      "last_snapshot": "2026-07-15T22:12:41.468071+00:00",
+      "first_observation": "1976-06-01",
+      "last_observation": "2026-07-14"
+    },
+    {
+      "source": "fred",
+      "series_id": "vix",
+      "vintage_rows": 9229,
+      "snapshots": 1,
+      "first_snapshot": "2026-07-15T22:11:56.500689+00:00",
+      "last_snapshot": "2026-07-15T22:11:56.500689+00:00",
+      "first_observation": "1990-01-02",
+      "last_observation": "2026-07-14"
+    }
+  ]
+}

@@ -1,12 +1,14 @@
 {
-  "evaluated_features": 79,
+  "evaluated_features": 91,
   "outside_training_range": [
     "reserves_level",
     "current_account_release_change",
-    "carry_spread_pp"
+    "carry_spread_pp",
+    "tes_slope_10y_1y_pp",
+    "policy_rate_spread_pp"
   ],
   "missing_features": [],
-  "outside_ratio": 0.0379746835443038,
+  "outside_ratio": 0.054945054945054944,
   "severe": false,
-  "generated_at": "2026-07-15T21:04:53.426873+00:00"
+  "generated_at": "2026-07-15T22:18:37.502889+00:00"
 }

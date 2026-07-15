@@ -1,6 +1,6 @@
 {
-  "version": "20260715T210329Z",
-  "created_at": "2026-07-15T21:03:29.579622+00:00",
+  "version": "20260715T221322Z",
+  "created_at": "2026-07-15T22:13:22.832072+00:00",
   "rows": 18508,
   "features": [
     "trm_chg_1",
@@ -77,11 +77,23 @@
     "financial_conditions_release_change",
     "financial_conditions_days_since_update",
     "financial_conditions_slow_z",
+    "trm_return_1",
+    "trm_realized_vol_5",
     "trm_realized_vol_20",
+    "trm_realized_vol_60",
     "trm_momentum_5",
     "trm_momentum_20",
+    "trm_momentum_60",
     "carry_spread_pp",
-    "carry_to_risk"
+    "carry_to_risk",
+    "tes_slope_10y_1y_pp",
+    "tes_curvature_pp",
+    "treasury_slope_10y_2y_pp",
+    "sovereign_rate_spread_10y_pp",
+    "sovereign_rate_spread_short_pp",
+    "policy_rate_spread_pp",
+    "global_risk_usd_interaction",
+    "brent_usd_20d_interaction"
   ],
   "horizons": [
     15,
@@ -94,6 +106,9 @@
     "ridge",
     "huber",
     "gradient_boosting",
+    "pca_ridge",
+    "extra_trees",
+    "quantile_boosting",
     "regime_ridge"
   ],
   "sklearn_version": "1.6.1",

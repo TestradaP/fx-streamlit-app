@@ -1,8 +1,12 @@
 {
-  "generated_at": "2026-07-15T21:04:51.265259+00:00",
-  "design": "purged expanding-window; 100-observation refit blocks",
-  "test_rows": 500,
+  "generated_at": "2026-07-15T22:18:35.515874+00:00",
+  "design": "purged expanding-window; 63-observation refit blocks",
+  "test_rows": 750,
   "purge_calendar_days": 60,
+  "stability_window_rows": 125,
+  "sealed_confirmation_fraction": 0.2,
+  "point_in_time_capture_active": true,
+  "historical_vintage_complete": false,
   "point_forecast_validation_passed": false,
   "operational_forecast_valid": true,
   "academic_ready": false,
@@ -13,7 +17,7 @@
     "60": "random_walk"
   },
   "academic_blockers": [
-    "No existe una base point-in-time de vintages para las series macroecon\u00f3micas revisables.",
+    "La captura point-in-time ya est\u00e1 activa, pero su historia comienza con el primer snapshot guardado y a\u00fan no cubre toda la muestra retrospectiva.",
     "Se requiere validaci\u00f3n externa en una muestra completamente sellada.",
     "No se dispone a\u00fan de NDF, opciones, CDS ni flujos de mercado."
   ]
