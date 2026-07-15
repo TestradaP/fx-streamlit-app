@@ -2184,19 +2184,15 @@ def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
         from usdcop.ui import module as ui_module
         
         # Ejecutamos la interfaz usando la función de inicio correcta del módulo
-        if hasattr(ui_module, 'render_ui'):
+        if hasattr(ui_module, 'render_module'):
+            ui_module.render_module()
+        elif hasattr(ui_module, 'render_ui'):
             ui_module.render_ui()
         elif hasattr(ui_module, 'main'):
             ui_module.main()
-        elif hasattr(ui_module, 'render'):
-            ui_module.render()
         else:
-            # ESTA LÍNEA NOS DIRÁ LA VERDAD:
             funciones_disponibles = [f for f in dir(ui_module) if not f.startswith('_')]
             st.warning(f"⚠️ Módulo cargado. Funciones detectadas: {funciones_disponibles}")
-            
-    except ImportError as e:
-        st.error(f"❌ Error al cargar las librerías del Módulo 11: {e}")
             
     except ImportError as e:
         st.error(f"❌ Error al cargar las librerías del Módulo 11: {e}")
