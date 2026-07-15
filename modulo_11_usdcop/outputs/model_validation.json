@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-15T20:40:08.479524+00:00",
+  "generated_at": "2026-07-15T21:04:51.265259+00:00",
   "design": "purged expanding-window; 100-observation refit blocks",
   "test_rows": 500,
   "purge_calendar_days": 60,
