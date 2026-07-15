@@ -28,10 +28,12 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             continue
         try:
             frame = banrep.fetch_series(item["series_id"], latest_n=10000)
-            repository.save_series(frame, "banrep", item["name"])
             quality = assess_series(frame, datetime.now().date(), int(item.get("max_staleness_days", 30)))
-            details["updated"].append(f"banrep:{item['name']}")
             details["quality"].append({"series": item["name"], **quality.__dict__})
+            if not quality.passed:
+                raise ValueError(f"quality check failed: {', '.join(quality.messages)}")
+            repository.save_series(frame, "banrep", item["name"])
+            details["updated"].append(f"banrep:{item['name']}")
         except Exception as exc:  # noqa: BLE001 - continue other sources
             LOGGER.exception("BanRep update failed for %s", item["name"])
             details["failed"].append({"series": f"banrep:{item['name']}", "error": str(exc)})
@@ -42,10 +44,12 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             continue
         try:
             frame = fred.fetch_series(item["series_id"])
-            repository.save_series(frame, "fred", item["name"])
             quality = assess_series(frame, datetime.now().date(), int(item.get("max_staleness_days", 30)))
-            details["updated"].append(f"fred:{item['name']}")
             details["quality"].append({"series": item["name"], **quality.__dict__})
+            if not quality.passed:
+                raise ValueError(f"quality check failed: {', '.join(quality.messages)}")
+            repository.save_series(frame, "fred", item["name"])
+            details["updated"].append(f"fred:{item['name']}")
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("FRED update failed for %s", item["name"])
             details["failed"].append({"series": f"fred:{item['name']}", "error": str(exc)})

@@ -19,9 +19,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
+from dotenv import load_dotenv
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 from statsmodels.tsa.arima.model import ARIMA
+
+from app_security import verify_credentials
 
 # Intentar importar FPDF para los reportes en PDF
 try:
@@ -35,6 +38,7 @@ genai = None
 # =========================
 # CONFIGURACIÓN DE PÁGINA
 # =========================
+load_dotenv()
 st.set_page_config(page_title="Dashboard Financiero Pro", layout="wide")
 
 # =========================
@@ -53,6 +57,20 @@ if "datos_leaseback" not in st.session_state:
 TRM_API_DATASETS = ["32sa-8pi3", "dit9-nnvp"]
 DATOS_GOV_BASE = "https://www.datos.gov.co/resource"
 SPREAD_POR_DEFECTO = 0.02
+
+
+def _authentication_config() -> tuple[str | None, str | None]:
+    """Load authentication values from the environment or Streamlit secrets."""
+    username = os.getenv("APP_USERNAME")
+    password_hash = os.getenv("APP_PASSWORD_HASH")
+    try:
+        auth_secrets = st.secrets.get("auth", {})
+    except Exception:
+        auth_secrets = {}
+    return (
+        username or auth_secrets.get("username"),
+        password_hash or auth_secrets.get("password_hash"),
+    )
 
 
 # =========================
@@ -2216,21 +2234,30 @@ def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
 def main():
     if not st.session_state.logged_in:
         st.title("🔒 Acceso Seguro - Tesorería")
+        expected_username, expected_password_hash = _authentication_config()
+        if not expected_username or not expected_password_hash:
+            st.error(
+                "La autenticación no está configurada. Defina APP_USERNAME y "
+                "APP_PASSWORD_HASH en el entorno o en [auth] de Streamlit secrets."
+            )
+            return
         with st.form("login_form"):
             usuario = st.text_input("Usuario")
             password = st.text_input("Contraseña", type="password")
             submit = st.form_submit_button("Ingresar")
             if submit:
-                if usuario == "admin" and password == "admin":
+                if verify_credentials(usuario, password, expected_username, expected_password_hash):
                     st.session_state.logged_in = True
+                    st.session_state.authenticated_user = usuario
                     st.rerun()
                 else: st.error("❌ Credenciales incorrectas.")
         return
 
     st.sidebar.title("Navegación Pro")
-    st.sidebar.write("👤 Conectado como: **Administrador**")
+    st.sidebar.write(f"👤 Conectado como: **{st.session_state.get('authenticated_user', 'Usuario')}**")
     if st.sidebar.button("Cerrar Sesión"):
         st.session_state.logged_in = False
+        st.session_state.pop("authenticated_user", None)
         st.rerun()
 
     st.sidebar.markdown("---")

@@ -25,6 +25,7 @@ class FredClient:
                 "series_id": series_id,
                 "api_key": self.api_key,
                 "file_type": "json",
+                "observation_start": "2021-01-01",
             },
             timeout=self.timeout_seconds,
         )

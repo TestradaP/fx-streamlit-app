@@ -28,7 +28,9 @@ def assess_series(frame: pd.DataFrame, as_of: date, max_staleness_days: int) -> 
         messages.append(f"{duplicates} duplicate observation dates")
     if missing:
         messages.append(f"{missing} missing or non-numeric values")
+    if age < 0:
+        messages.append(f"series contains observations {-age} days in the future")
     if age > max_staleness_days:
         messages.append(f"series is stale by {age} days")
-    passed = duplicates == 0 and missing == 0 and age <= max_staleness_days
+    passed = duplicates == 0 and missing == 0 and 0 <= age <= max_staleness_days
     return QualityResult(passed, len(frame), duplicates, missing, age, tuple(messages))

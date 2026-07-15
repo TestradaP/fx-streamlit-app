@@ -28,6 +28,15 @@ streamlit run pages/11_USD_COP.py
 
 En Linux/macOS use `source .venv/bin/activate` y `cp .env.example .env`.
 
+Antes de ejecutar la actualización, configure `FRED_API_KEY` en `.env`. En
+GitHub Actions, cree un secret de repositorio con el mismo nombre. Nunca incluya
+la clave directamente en el código.
+
+Para el dashboard principal, genere un hash de contraseña con
+`python scripts/hash_password.py` desde la raíz del repositorio. Configure
+`APP_USERNAME` y `APP_PASSWORD_HASH` como variables de entorno, o copie
+`.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` y complete `[auth]`.
+
 ## Integracion en una plataforma existente
 
 ```python

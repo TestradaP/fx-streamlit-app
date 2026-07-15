@@ -15,16 +15,21 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: python -m pip install -r modulo_11_usdcop-2/requirements.txt
-      - run: python -m pip install -e ./modulo_11_usdcop-2
-      - run: python modulo_11_usdcop-2/scripts/update_daily.py
-      - run: python modulo_11_usdcop-2/scripts/run_forecast.py || true
+      - run: python -m pip install -r modulo_11_usdcop/requirements.txt
+      - run: python -m pip install -e ./modulo_11_usdcop
+      - run: python -m unittest discover -s tests -v
+      - run: python -m unittest discover -s modulo_11_usdcop/tests -v
+      - run: python modulo_11_usdcop/scripts/update_daily.py
+        env:
+          # Configure this as a repository secret; it is never stored in source.
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      - run: python modulo_11_usdcop/scripts/run_forecast.py
       - uses: actions/upload-artifact@v4
         with:
           name: usdcop-data-${{ github.run_id }}
           path: |
-            modulo_11_usdcop-2/data/store
-            modulo_11_usdcop-2/outputs
+            modulo_11_usdcop/data/store
+            modulo_11_usdcop/outputs
           retention-days: 30
 
 # Importante: los runners son efimeros. Para produccion, reemplace artifacts por

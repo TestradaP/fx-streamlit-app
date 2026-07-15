@@ -12,4 +12,7 @@ from usdcop.pipeline.update_data import update_all  # noqa: E402
 
 if __name__ == "__main__":
     configure_logging()
-    print(json.dumps(update_all(ROOT), ensure_ascii=False, indent=2, default=str))
+    result = update_all(ROOT)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if result["status"] != "success":
+        raise SystemExit(1)
