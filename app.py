@@ -2166,9 +2166,17 @@ def app_viaticos():
 # PUENTE DE CONEXIÓN: MÓDULO 11 (Inteligencia Cambiaria)
 # ========================================================
 # 1. Le decimos a Python que reconozca la carpeta 'src' del módulo 11
-ruta_mod_11 = Path(__file__).parent / "modulo_11_usdcop" / "src"
+# ========================================================
+# PUENTE DE CONEXIÓN: MÓDULO 11 (Inteligencia Cambiaria)
+# ========================================================
+ruta_mod_11 = Path(__file__).parent / "modulo_11_usdcop"
+ruta_src = ruta_mod_11 / "src"
+
+# Aseguramos que Python encuentre las carpetas internas en Linux/Nube
+if str(ruta_src) not in sys.path:
+    sys.path.insert(0, str(ruta_src))
 if str(ruta_mod_11) not in sys.path:
-    sys.path.append(str(ruta_mod_11))
+    sys.path.insert(0, str(ruta_mod_11))
 
 # 2. Creamos la función que llamaste en tu menú
 def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
