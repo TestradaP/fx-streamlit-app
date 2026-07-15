@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from io import StringIO
+
+import pandas as pd
+
+from .http import build_session
+
+
+class FredClient:
+    CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
+
+    def __init__(self, timeout_seconds: int = 30) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.session = build_session()
+
+    def fetch_series(self, series_id: str) -> pd.DataFrame:
+        response = self.session.get(
+            self.CSV_URL,
+            params={"id": series_id},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        frame = pd.read_csv(StringIO(response.text))
+        if frame.shape[1] < 2:
+            raise ValueError(f"Unexpected FRED CSV for {series_id}")
+        frame.columns = ["observation_date", "value", *frame.columns[2:]]
+        frame["observation_date"] = pd.to_datetime(frame["observation_date"], errors="coerce")
+        frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+        frame = frame.dropna(subset=["observation_date", "value"]).copy()
+        frame["series_id"] = series_id
+        frame["source"] = "fred"
+        frame["retrieved_at"] = datetime.now(timezone.utc)
+        frame["release_timestamp"] = frame["observation_date"]
+        return frame[
+            [
+                "series_id",
+                "observation_date",
+                "value",
+                "release_timestamp",
+                "retrieved_at",
+                "source",
+            ]
+        ]

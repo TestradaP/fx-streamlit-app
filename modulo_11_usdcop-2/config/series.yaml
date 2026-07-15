@@ -1,0 +1,102 @@
+banrep:
+  - name: trm
+    series_id: 1
+    frequency: daily
+    enabled: true
+    max_staleness_days: 3
+  - name: policy_rate
+    series_id: 59
+    frequency: event
+    enabled: true
+    max_staleness_days: 60
+  - name: ibr_on
+    series_id: 241
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: reserves
+    series_id: 15051
+    frequency: weekly
+    enabled: true
+    max_staleness_days: 20
+  - name: tes_cop_1y
+    series_id: 15272
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: tes_cop_5y
+    series_id: 15273
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: tes_cop_10y
+    series_id: 15274
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: inflation
+    series_id: 15270
+    frequency: monthly
+    enabled: true
+    max_staleness_days: 60
+  - name: current_account
+    series_id: 15136
+    frequency: quarterly
+    enabled: true
+    max_staleness_days: 150
+  # Descubrir y confirmar en el catalogo SUAMECA antes de habilitar:
+  - name: remittances
+    series_id: null
+    discovery_keywords: [remesas, trabajadores]
+    frequency: monthly
+    enabled: false
+  - name: external_debt
+    series_id: null
+    discovery_keywords: [deuda externa, saldo]
+    frequency: monthly_or_quarterly
+    enabled: false
+  - name: ndf_forward
+    series_id: null
+    discovery_keywords: [forwards NDF, operaciones forward]
+    frequency: daily
+    enabled: false
+  - name: fx_intervention
+    series_id: null
+    discovery_keywords: [intervencion cambiaria]
+    frequency: daily_or_monthly
+    enabled: false
+fred:
+  - name: sofr
+    series_id: SOFR
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: vix
+    series_id: VIXCLS
+    frequency: daily
+    enabled: true
+    max_staleness_days: 5
+  - name: broad_usd
+    series_id: DTWEXBGS
+    frequency: daily
+    enabled: true
+    max_staleness_days: 10
+  - name: brent
+    series_id: DCOILBRENTEU
+    frequency: daily
+    enabled: true
+    max_staleness_days: 10
+  - name: treasury_2y
+    series_id: DGS2
+    frequency: daily
+    enabled: true
+    max_staleness_days: 10
+  - name: treasury_10y
+    series_id: DGS10
+    frequency: daily
+    enabled: true
+    max_staleness_days: 10
+dane:
+  trade_balance_page: https://www.dane.gov.co/index.php/estadisticas-por-tema/comercio-internacional/balanza-comercial
+optional_market:
+  variables: [ndf_1m, ndf_2m, implied_vol_1m, risk_reversal_25d, colombia_cds_5y, order_flow]

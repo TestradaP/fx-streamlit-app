@@ -1,0 +1,20 @@
+timezone: America/Bogota
+horizons_calendar_days: [15, 30, 45, 60]
+day_count_basis: 360
+minimum_training_rows: 750
+validation:
+  minimum_test_rows: 180
+  rolling_error_window: 120
+  interval_coverage: [0.50, 0.80, 0.90]
+storage:
+  root: data/store
+  output_root: outputs
+refresh:
+  official_daily_after: "17:15"
+  intraday_ttl_seconds: 900
+  monthly_quarterly_use_release_timestamp: true
+model:
+  champion_metric: crps
+  max_feature_staleness_days: 120
+  retrain_weekday: 6
+  random_seed: 20260715

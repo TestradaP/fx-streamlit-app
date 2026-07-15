@@ -1,0 +1,9 @@
+metric,value,unit,observation_date,source,source_url
+TRM,3252.11,COP por USD,2026-07-15,Banco de la Republica,https://www.banrep.gov.co/es
+IBR_ON,11.181,porcentaje nominal,2026-07-14,Banco de la Republica,https://www.banrep.gov.co/es
+POLICY_RATE,12.0,porcentaje,2026-07-01,Banco de la Republica,https://www.banrep.gov.co/es
+INFLATION_YOY,6.14,porcentaje,2026-06-30,Banco de la Republica / DANE,https://www.banrep.gov.co/es
+SOFR,3.63,porcentaje,2026-07-14,FRED / Federal Reserve Bank of New York,https://fred.stlouisfed.org/series/SOFR
+VIX,16.50,indice,2026-07-14,FRED / CBOE,https://fred.stlouisfed.org/series/VIXCLS
+BROAD_USD,120.5046,indice enero 2006=100,2026-07-10,FRED / Board of Governors,https://fred.stlouisfed.org/series/DTWEXBGS
+TRADE_BALANCE,-1760.8,USD millones FOB,2026-04-30,DANE,https://www.dane.gov.co/index.php/estadisticas-por-tema/comercio-internacional/balanza-comercial

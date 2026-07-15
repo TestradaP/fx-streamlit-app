@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 import json
 import os
 import re
@@ -2161,6 +2163,112 @@ def app_viaticos():
                     plt.xticks(rotation=45, ha='right')
                     st.pyplot(fig_t)
 
+# ========================================================
+# MÓDULO 11: INTELIGENCIA CAMBIARIA USD/COP
+# ========================================================
+def app_inteligencia_cambiaria_usdcop(
+    facturas_file=None,
+    monetizaciones_file=None,
+):
+    """Carga el módulo 11 y precarga la exposición viva de CxC en USD."""
+
+    app_root = Path(__file__).resolve().parent
+    module_root = app_root / "modules" / "modulo_11_usdcop"
+    module_src = module_root / "src"
+
+    if not module_root.exists():
+        st.error(
+            "No se encontró el módulo 11 en: "
+            f"{module_root}. Copia la carpeta completa en "
+            "modules/modulo_11_usdcop."
+        )
+        return
+
+    if str(module_src) not in sys.path:
+        sys.path.insert(0, str(module_src))
+
+    try:
+        from usdcop.ui.module import render_module
+    except ModuleNotFoundError as exc:
+        st.error(
+            "Falta una dependencia del módulo 11. "
+            "Instálala dentro del mismo entorno virtual usado por Streamlit."
+        )
+        st.code(
+            "python -m pip install "
+            "-r modules/modulo_11_usdcop/requirements.txt",
+            language="powershell",
+        )
+        st.caption(f"Importación no disponible: {exc}")
+        return
+
+    # Precarga de exposición desde CxC y monetizaciones
+    default_exposure_usd = None
+
+    if facturas_file is not None:
+        try:
+            if hasattr(facturas_file, "seek"):
+                facturas_file.seek(0)
+
+            if (
+                monetizaciones_file is not None
+                and hasattr(monetizaciones_file, "seek")
+            ):
+                monetizaciones_file.seek(0)
+
+            facturas = cargar_facturas(facturas_file)
+            monetizaciones = cargar_monetizaciones(monetizaciones_file)
+
+            if not monetizaciones.empty:
+                pagado_por_factura = (
+                    monetizaciones
+                    .groupby("factura")["monto_usd"]
+                    .sum()
+                )
+            else:
+                pagado_por_factura = pd.Series(dtype=float)
+
+            monetizado = (
+                facturas["factura"]
+                .map(pagado_por_factura)
+                .fillna(0.0)
+            )
+
+            saldos = facturas["valor_usd"] - monetizado
+
+            default_exposure_usd = float(
+                saldos.clip(lower=0.0).sum()
+            )
+
+        except Exception as exc:
+            st.warning(
+                "El módulo se abrirá, pero no fue posible precargar "
+                f"la exposición de CxC: {exc}"
+            )
+
+        finally:
+            if hasattr(facturas_file, "seek"):
+                facturas_file.seek(0)
+
+            if (
+                monetizaciones_file is not None
+                and hasattr(monetizaciones_file, "seek")
+            ):
+                monetizaciones_file.seek(0)
+
+    try:
+        render_module(
+            project_root=module_root,
+            default_exposure_usd=default_exposure_usd,
+        )
+
+    except Exception as exc:
+        st.error(
+            "El módulo 11 fue encontrado, "
+            "pero ocurrió un error al cargarlo."
+        )
+        st.exception(exc)
+
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
@@ -2196,6 +2304,7 @@ def main():
         "8. Lectura del Histórico",
         "9. Laboratorio Quant (Avanzado)",
         "10. Gestión de Viáticos y Legalizaciones",
+        "11. Inteligencia Cambiaria USD/COP",
     ))
     
     st.sidebar.markdown("---")
@@ -2216,6 +2325,7 @@ def main():
     elif app_sel == "8. Lectura del Histórico": app_lectura_historico()
     elif app_sel == "9. Laboratorio Quant (Avanzado)": app_laboratorio_quant(f_usd, m_usd)
     elif app_sel == "10. Gestión de Viáticos y Legalizaciones": app_viaticos()
+    elif app_sel == "11. Inteligencia Cambiaria USD/COP": app_inteligencia_cambiaria_usdcop(f_usd, m_usd)
 
 if __name__ == "__main__":
     main()
