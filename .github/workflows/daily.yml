@@ -15,16 +15,16 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: python -m pip install -r requirements.txt
-      - run: python -m pip install -e .
-      - run: python scripts/update_daily.py
-      - run: python scripts/run_forecast.py || true
+      - run: python -m pip install -r modulo_11_usdcop-2/requirements.txt
+      - run: python -m pip install -e ./modulo_11_usdcop-2
+      - run: python modulo_11_usdcop-2/scripts/update_daily.py
+      - run: python modulo_11_usdcop-2/scripts/run_forecast.py || true
       - uses: actions/upload-artifact@v4
         with:
           name: usdcop-data-${{ github.run_id }}
           path: |
-            data/store
-            outputs
+            modulo_11_usdcop-2/data/store
+            modulo_11_usdcop-2/outputs
           retention-days: 30
 
 # Importante: los runners son efimeros. Para produccion, reemplace artifacts por
