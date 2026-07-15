@@ -2162,113 +2162,39 @@ def app_viaticos():
                     ax_t.spines['top'].set_visible(False); ax_t.spines['right'].set_visible(False)
                     plt.xticks(rotation=45, ha='right')
                     st.pyplot(fig_t)
-
 # ========================================================
-# MÓDULO 11: INTELIGENCIA CAMBIARIA USD/COP
+# PUENTE DE CONEXIÓN: MÓDULO 11 (Inteligencia Cambiaria)
 # ========================================================
-def app_inteligencia_cambiaria_usdcop(
-    facturas_file=None,
-    monetizaciones_file=None,
-):
-    """Carga el módulo 11 y precarga la exposición viva de CxC en USD."""
+# 1. Le decimos a Python que reconozca la carpeta 'src' del módulo 11
+ruta_mod_11 = Path(__file__).parent / "modulo_11_usdcop" / "src"
+if str(ruta_mod_11) not in sys.path:
+    sys.path.append(str(ruta_mod_11))
 
-    app_root = Path(__file__).resolve().parent
-    module_root = app_root / "modules" / "modulo_11_usdcop"
-    module_src = module_root / "src"
-
-    if not module_root.exists():
-        st.error(
-            "No se encontró el módulo 11 en: "
-            f"{module_root}. Copia la carpeta completa en "
-            "modules/modulo_11_usdcop."
-        )
+# 2. Creamos la función que llamaste en tu menú
+def app_inteligencia_cambiaria_usdcop(f_usd, m_usd):
+    st.title("📈 Módulo 11: Inteligencia Cambiaria USD/COP")
+    
+    # Verificamos que la carpeta exista físicamente donde debe estar
+    if not ruta_mod_11.exists():
+        st.error("❌ No se encontró la carpeta 'modulo_11_usdcop'. Asegúrate de haberla descomprimido junto a app.py.")
         return
-
-    if str(module_src) not in sys.path:
-        sys.path.insert(0, str(module_src))
-
+        
     try:
-        from usdcop.ui.module import render_module
-    except ModuleNotFoundError as exc:
-        st.error(
-            "Falta una dependencia del módulo 11. "
-            "Instálala dentro del mismo entorno virtual usado por Streamlit."
-        )
-        st.code(
-            "python -m pip install "
-            "-r modules/modulo_11_usdcop/requirements.txt",
-            language="powershell",
-        )
-        st.caption(f"Importación no disponible: {exc}")
-        return
-
-    # Precarga de exposición desde CxC y monetizaciones
-    default_exposure_usd = None
-
-    if facturas_file is not None:
-        try:
-            if hasattr(facturas_file, "seek"):
-                facturas_file.seek(0)
-
-            if (
-                monetizaciones_file is not None
-                and hasattr(monetizaciones_file, "seek")
-            ):
-                monetizaciones_file.seek(0)
-
-            facturas = cargar_facturas(facturas_file)
-            monetizaciones = cargar_monetizaciones(monetizaciones_file)
-
-            if not monetizaciones.empty:
-                pagado_por_factura = (
-                    monetizaciones
-                    .groupby("factura")["monto_usd"]
-                    .sum()
-                )
-            else:
-                pagado_por_factura = pd.Series(dtype=float)
-
-            monetizado = (
-                facturas["factura"]
-                .map(pagado_por_factura)
-                .fillna(0.0)
-            )
-
-            saldos = facturas["valor_usd"] - monetizado
-
-            default_exposure_usd = float(
-                saldos.clip(lower=0.0).sum()
-            )
-
-        except Exception as exc:
-            st.warning(
-                "El módulo se abrirá, pero no fue posible precargar "
-                f"la exposición de CxC: {exc}"
-            )
-
-        finally:
-            if hasattr(facturas_file, "seek"):
-                facturas_file.seek(0)
-
-            if (
-                monetizaciones_file is not None
-                and hasattr(monetizaciones_file, "seek")
-            ):
-                monetizaciones_file.seek(0)
-
-    try:
-        render_module(
-            project_root=module_root,
-            default_exposure_usd=default_exposure_usd,
-        )
-
-    except Exception as exc:
-        st.error(
-            "El módulo 11 fue encontrado, "
-            "pero ocurrió un error al cargarlo."
-        )
-        st.exception(exc)
-
+        # Intentamos importar la interfaz gráfica desde la carpeta del Módulo 11
+        from usdcop.ui import module as ui_module
+        
+        # Ejecutamos la interfaz (aquí asumo que la función principal se llama main o render)
+        # Si arroja error de atributo, lo ajustaremos en el siguiente paso.
+        if hasattr(ui_module, 'main'):
+            ui_module.main()
+        elif hasattr(ui_module, 'render'):
+            ui_module.render()
+        else:
+            st.warning("⚠️ El módulo cargó, pero necesitamos identificar el nombre exacto de su función de inicio.")
+            
+    except ImportError as e:
+        st.error(f"❌ Error al cargar las librerías del Módulo 11: {e}")
+        st.info("💡 Recuerda instalar los requerimientos en tu terminal: pip install -r modulo_11_usdcop/requirements.txt")
 # =========================
 # MENÚ PRINCIPAL Y LOGIN
 # =========================
