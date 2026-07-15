@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from usdcop.ui.module import _forecast_review_id, _load_quality_snapshot
+from usdcop.ui.module import _forecast_review_id, _load_drivers, _load_quality_snapshot
 
 
 class DailyReviewTests(unittest.TestCase):
@@ -28,6 +28,24 @@ class DailyReviewTests(unittest.TestCase):
             actual = _load_quality_snapshot(SimpleNamespace(output_root=output_root))
 
         self.assertEqual(actual, expected)
+
+    def test_loads_published_drivers(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_root = Path(temporary_directory)
+            expected = pd.DataFrame(
+                [
+                    {
+                        "horizon_days": 30,
+                        "feature": "vix_level",
+                        "contribution_cop_approx": 12.5,
+                    }
+                ]
+            )
+            expected.to_csv(output_root / "forecast_drivers.csv", index=False)
+
+            actual = _load_drivers(SimpleNamespace(output_root=output_root))
+
+        pd.testing.assert_frame_equal(actual, expected)
 
 
 if __name__ == "__main__":

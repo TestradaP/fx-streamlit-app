@@ -46,6 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add modulo_11_usdcop/outputs/latest_forecasts.csv
+          git add modulo_11_usdcop/outputs/forecast_drivers.csv
           git add modulo_11_usdcop/outputs/forecast_status.json
           git add modulo_11_usdcop/outputs/data_quality_latest.json
           if git diff --cached --quiet; then

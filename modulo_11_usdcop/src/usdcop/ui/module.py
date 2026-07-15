@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from usdcop.config import resolve_paths
@@ -13,6 +14,16 @@ from usdcop.ui.charts import forecast_chart
 AUTOMATED_MODEL_STATUSES = {
     "MODEL_ACTIVE_AUTOMATED_DAILY",
     "MODEL_TRAINED_PENDING_FORMAL_APPROVAL",  # Legacy published forecast.
+}
+
+DRIVER_GROUP_LABELS = {
+    "rates_and_carry": "Tasas y carry",
+    "global_risk": "Riesgo global",
+    "external_flows": "Flujos externos",
+    "domestic_macro": "Macro local",
+    "technical_fx": "Dinámica USD/COP",
+    "other": "Otros",
+    "base_model": "Base del modelo",
 }
 
 
@@ -41,6 +52,13 @@ def _load_quality_snapshot(paths) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _load_drivers(paths) -> pd.DataFrame:
+    driver_path = paths.output_root / "forecast_drivers.csv"
+    if not driver_path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(driver_path)
+
+
 def _forecast_review_id(forecast: pd.DataFrame) -> str:
     first = forecast.iloc[0]
     return "|".join(
@@ -61,6 +79,7 @@ def render_module(project_root: str | Path | None = None) -> None:
     st.caption("Soporte probabilistico para caja y coberturas. No constituye recomendacion de inversion.")
 
     forecast = _load_forecast(paths)
+    drivers = _load_drivers(paths)
     quality_snapshot = _load_quality_snapshot(paths)
     status = str(forecast.get("status", pd.Series(["UNKNOWN"])).iloc[0])
     review_id = _forecast_review_id(forecast)
@@ -109,10 +128,110 @@ def render_module(project_root: str | Path | None = None) -> None:
 
     with tabs[1]:
         st.subheader("Contribuciones y regimen")
-        st.info(
-            "Esta vista se habilita cuando existen artefactos aprobados de explicabilidad. "
-            "Debe mostrar contribuciones de carry, riesgo global, flujos externos, fiscal/politico y microestructura."
-        )
+        if drivers.empty:
+            st.warning(
+                "Aún no existe el archivo de drivers. Ejecute nuevamente el workflow diario "
+                "para publicar la explicabilidad del modelo."
+            )
+        else:
+            horizons = sorted(drivers["horizon_days"].dropna().astype(int).unique())
+            default_horizon = horizons.index(30) if 30 in horizons else 0
+            horizon = st.selectbox(
+                "Horizonte del pronóstico",
+                horizons,
+                index=default_horizon,
+                format_func=lambda value: f"{value} días",
+            )
+            selected = drivers.loc[drivers["horizon_days"].eq(horizon)].copy()
+            selected["driver_group_label"] = selected["driver_group"].map(
+                DRIVER_GROUP_LABELS
+            ).fillna(selected["driver_group"])
+
+            feature_rows = selected.loc[selected["feature"].ne("intercept")].copy()
+            feature_rows["absolute_contribution"] = feature_rows[
+                "contribution_cop_approx"
+            ].abs()
+            top = feature_rows.nlargest(12, "absolute_contribution").sort_values(
+                "contribution_cop_approx"
+            )
+            if top.empty:
+                st.info(
+                    "El modelo no produjo contribuciones distintas de cero para este horizonte."
+                )
+            else:
+                figure = px.bar(
+                    top,
+                    x="contribution_cop_approx",
+                    y="feature",
+                    orientation="h",
+                    color="direction",
+                    color_discrete_map={
+                        "up": "#16803c",
+                        "down": "#c63c3c",
+                        "neutral": "#777777",
+                    },
+                    hover_data={
+                        "driver_group_label": True,
+                        "feature_value": ":.4f",
+                        "standardized_value": ":.3f",
+                        "coefficient": ":.6f",
+                        "contribution_cop_approx": ":.2f",
+                    },
+                    labels={
+                        "contribution_cop_approx": "Contribución aproximada (COP)",
+                        "feature": "Variable",
+                        "direction": "Dirección",
+                        "driver_group_label": "Grupo",
+                    },
+                )
+                figure.add_vline(x=0, line_width=1, line_color="#777777")
+                figure.update_layout(legend_title_text="Impacto sobre USD/COP")
+                st.plotly_chart(figure, use_container_width=True)
+
+            grouped = (
+                feature_rows.groupby("driver_group_label", as_index=False)[
+                    ["contribution_log_return", "contribution_cop_approx"]
+                ]
+                .sum()
+                .sort_values("contribution_cop_approx", ascending=False)
+                .rename(
+                    columns={
+                        "driver_group_label": "Grupo",
+                        "contribution_log_return": "Contribución log-return",
+                        "contribution_cop_approx": "Impacto aproximado COP",
+                    }
+                )
+            )
+            st.markdown("#### Efecto agregado por grupo")
+            st.dataframe(
+                grouped,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Contribución log-return": st.column_config.NumberColumn(
+                        format="%.6f"
+                    ),
+                    "Impacto aproximado COP": st.column_config.NumberColumn(
+                        format="$ %.2f"
+                    ),
+                },
+            )
+            intercept = selected.loc[
+                selected["feature"].eq("intercept"), "contribution_cop_approx"
+            ]
+            if not intercept.empty:
+                st.caption(
+                    f"Componente base del modelo: {_format_cop(intercept.iloc[0])} COP."
+                )
+            if status in AUTOMATED_MODEL_STATUSES and not is_daily_approved:
+                st.info(
+                    "Explicabilidad preliminar: revise y apruebe los datos diarios antes de usarla."
+                )
+            st.caption(
+                "Las barras descomponen exactamente la predicción lineal ElasticNet en el espacio "
+                "de log-retornos; el valor en COP es una aproximación local y no implica causalidad. "
+                "El modelo actual no incluye variables explícitas de política/fiscal ni microestructura."
+            )
 
     with tabs[2]:
         st.subheader("Validacion walk-forward")

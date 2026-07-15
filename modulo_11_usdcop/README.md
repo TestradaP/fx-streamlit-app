@@ -69,11 +69,13 @@ El flujo recomendado es:
 3. `run_forecast.py`: calcula benchmarks, pronosticos e intervalos.
 4. Streamlit lee artefactos versionados de una base persistente.
 
-El workflow incluido publica `outputs/latest_forecasts.csv` y
-`outputs/forecast_status.json`, junto con `outputs/data_quality_latest.json`, en la
-rama `main` después de una ejecución correcta. Streamlit Community Cloud detecta
-ese commit y actualiza la aplicación. El usuario revisa este control en "Frescura
-y gobierno" y aprueba el pronóstico exacto para su sesión.
+El workflow incluido publica `outputs/latest_forecasts.csv`,
+`outputs/forecast_drivers.csv` y `outputs/forecast_status.json`, junto con
+`outputs/data_quality_latest.json`, en la rama `main` después de una ejecución
+correcta. Streamlit Community Cloud detecta ese commit y actualiza la aplicación.
+El usuario revisa este control en "Frescura y gobierno" y aprueba el pronóstico
+exacto para su sesión. La pestaña "Drivers" muestra la descomposición ElasticNet
+por variable y por grupo para cada horizonte.
 Los Parquet y SQLite completos se conservan como artifacts de GitHub Actions para
 evitar aumentar innecesariamente el historial Git.
 

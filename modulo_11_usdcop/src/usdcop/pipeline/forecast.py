@@ -17,6 +17,18 @@ from usdcop.models.baselines import baseline_table
 
 LOGGER = logging.getLogger(__name__)
 
+DRIVER_COLUMNS = [
+    "horizon_days",
+    "feature",
+    "driver_group",
+    "feature_value",
+    "standardized_value",
+    "coefficient",
+    "contribution_log_return",
+    "contribution_cop_approx",
+    "direction",
+]
+
 
 def _validate_artifact_runtime(artifact: dict) -> None:
     trained_version = artifact.get("sklearn_version")
@@ -29,6 +41,77 @@ def _validate_artifact_runtime(artifact: dict) -> None:
 def _latest_value(repository: SeriesRepository, source: str, name: str) -> float:
     frame = repository.load_series(source, name)
     return float(frame.sort_values("observation_date").iloc[-1]["value"])
+
+
+def _driver_group(feature: str) -> str:
+    name = feature.lower()
+    if name == "intercept":
+        return "base_model"
+    if name.startswith("trm_") or name in {"trm", "spot"}:
+        return "technical_fx"
+    if any(token in name for token in ("vix", "broad_usd", "brent")):
+        return "global_risk"
+    if any(token in name for token in ("current_account", "reserves", "trade_balance")):
+        return "external_flows"
+    if any(
+        token in name
+        for token in ("ibr", "sofr", "treasury", "tes_", "policy_rate", "carry")
+    ):
+        return "rates_and_carry"
+    if "inflation" in name:
+        return "domestic_macro"
+    return "other"
+
+
+def _elastic_net_driver_table(model, latest: pd.DataFrame, spot: float) -> pd.DataFrame:
+    """Return the exact linear contribution of every input for each horizon."""
+    rows: list[dict] = []
+    model_input = latest.reindex(columns=model.feature_names)
+
+    for horizon, pipeline in sorted(model.models.items()):
+        imputed = pipeline.named_steps["imputer"].transform(model_input)
+        standardized = pipeline.named_steps["scale"].transform(imputed)
+        estimator = pipeline.named_steps["model"]
+        coefficients = np.asarray(estimator.coef_, dtype=float).reshape(-1)
+        values = np.asarray(standardized, dtype=float)[0]
+
+        for index, feature in enumerate(model.feature_names):
+            contribution = float(values[index] * coefficients[index])
+            raw_value = model_input.iloc[0, index]
+            rows.append(
+                {
+                    "horizon_days": int(horizon),
+                    "feature": feature,
+                    "driver_group": _driver_group(feature),
+                    "feature_value": float(raw_value) if pd.notna(raw_value) else np.nan,
+                    "standardized_value": float(values[index]),
+                    "coefficient": float(coefficients[index]),
+                    "contribution_log_return": contribution,
+                    "contribution_cop_approx": float(spot * contribution),
+                    "direction": (
+                        "up" if contribution > 0 else "down" if contribution < 0 else "neutral"
+                    ),
+                }
+            )
+
+        intercept = float(np.asarray(estimator.intercept_).reshape(-1)[0])
+        rows.append(
+            {
+                "horizon_days": int(horizon),
+                "feature": "intercept",
+                "driver_group": _driver_group("intercept"),
+                "feature_value": np.nan,
+                "standardized_value": 1.0,
+                "coefficient": intercept,
+                "contribution_log_return": intercept,
+                "contribution_cop_approx": float(spot * intercept),
+                "direction": (
+                    "up" if intercept > 0 else "down" if intercept < 0 else "neutral"
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=DRIVER_COLUMNS)
 
 
 def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
@@ -48,6 +131,7 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
     output["status"] = "BENCHMARK_ONLY_NOT_TRAINED"
     output["model_version"] = None
     output["model_error"] = None
+    drivers = pd.DataFrame(columns=DRIVER_COLUMNS)
 
     champion_file = paths.output_root / "champion_model.txt"
     if champion_file.exists():
@@ -71,6 +155,7 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
             features = engineer_market_features(panel)
             latest = features.reindex(columns=features_needed).iloc[[-1]]
             predicted = model.predict_log_returns(latest).iloc[0]
+            drivers = _elastic_net_driver_table(model, latest, spot)
             for index, row in output.iterrows():
                 horizon = int(row["horizon_days"])
                 log_return = float(predicted[f"pred_log_return_{horizon}d"])
@@ -84,6 +169,7 @@ def run_forecast(project_root: str | Path | None = None) -> pd.DataFrame:
 
     output["generated_at"] = datetime.now(timezone.utc).isoformat()
     output.to_csv(paths.output_root / "latest_forecasts.csv", index=False)
+    drivers.to_csv(paths.output_root / "forecast_drivers.csv", index=False)
     (paths.output_root / "forecast_status.json").write_text(
         json.dumps(
             {
