@@ -13,9 +13,9 @@ from usdcop.ui.charts import forecast_chart
 def _load_forecast(paths) -> pd.DataFrame:
     from pathlib import Path
     
-    # 1. Encontrar la raíz real de 'modulo_11_usdcop' sin importar el entorno
-    # Subimos 4 niveles desde ui/module.py para llegar a 'modulo_11_usdcop'
-    raiz_modulo = Path(__file__).resolve().parents[4]
+    # 1. Encontrar la raíz de 'modulo_11_usdcop'
+    # Subimos 4 niveles (padre de src/ que es index parents[3])
+    raiz_modulo = Path(__file__).resolve().parents[3]
     
     # 2. Definir las rutas físicas absolutas
     live = raiz_modulo / "outputs" / "latest_forecasts.csv"
@@ -28,7 +28,7 @@ def _load_forecast(paths) -> pd.DataFrame:
     if reference.exists():
         return pd.read_csv(reference)
         
-    # Plan C de emergencia extrema (por si se desubicara en alguna ruta extraña)
+    # Plan C de emergencia extrema si nada existe
     raise FileNotFoundError(
         f"No se encontró ningún archivo de pronósticos.\n"
         f"Ruta Live buscada: {live.resolve()}\n"
