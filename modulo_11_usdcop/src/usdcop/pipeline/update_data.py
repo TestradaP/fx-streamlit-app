@@ -34,7 +34,8 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             quality = assess_series(
                 frame,
                 datetime.now().date(),
-                int(item.get("max_staleness_days", 30)),
+                # 💡 TRUCO: Forzamos mínimo 15 días de tolerancia para no borrar la historia por rezagos normales
+                max(int(item.get("max_staleness_days", 30)), 15),
                 item.get("expected_min"),
                 item.get("expected_max"),
             )
@@ -68,7 +69,8 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
             quality = assess_series(
                 frame,
                 datetime.now().date(),
-                int(item.get("max_staleness_days", 30)),
+                # 💡 TRUCO: Forzamos mínimo 15 días de tolerancia para no borrar la historia por rezagos normales
+                max(int(item.get("max_staleness_days", 30)), 15),
                 item.get("expected_min"),
                 item.get("expected_max"),
             )
