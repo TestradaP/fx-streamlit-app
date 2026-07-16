@@ -35,11 +35,15 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
                 item.get("expected_min"),
                 item.get("expected_max"),
             )
+            # ... código previo de BanRep ...
             details["quality"].append({"series": item["name"], **quality.__dict__})
             
             if not quality.passed:
-                # 💡 TRANSFORMACIÓN: De error crítico a advertencia controlada
                 LOGGER.warning("⚠️ Alerta de calidad de datos para banrep:%s: %s", item["name"], ", ".join(quality.messages))
+                continue  # 👈 ¡CLAVE! Nos saltamos esta serie, NO llamamos a save_series, pero el bucle FOR continúa con la siguiente
+            
+            repository.save_series(frame, "banrep", item["name"])
+            details["updated"].append(f"banrep:{item['name']}")
             
             # Al quitar el 'raise', la ejecución fluye de forma natural hasta el guardado
             repository.save_series(frame, "banrep", item["name"])
