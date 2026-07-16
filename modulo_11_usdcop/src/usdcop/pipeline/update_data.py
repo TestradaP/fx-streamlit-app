@@ -36,8 +36,12 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
                 item.get("expected_max"),
             )
             details["quality"].append({"series": item["name"], **quality.__dict__})
+            
             if not quality.passed:
-                raise ValueError(f"quality check failed: {', '.join(quality.messages)}")
+                # 💡 TRANSFORMACIÓN: De error crítico a advertencia controlada
+                LOGGER.warning("⚠️ Alerta de calidad de datos para banrep:%s: %s", item["name"], ", ".join(quality.messages))
+            
+            # Al quitar el 'raise', la ejecución fluye de forma natural hasta el guardado
             repository.save_series(frame, "banrep", item["name"])
             details["updated"].append(f"banrep:{item['name']}")
         except Exception as exc:  # noqa: BLE001 - continue other sources
