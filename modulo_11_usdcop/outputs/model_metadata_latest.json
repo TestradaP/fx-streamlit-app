@@ -1,7 +1,7 @@
 {
-  "version": "20260715T221322Z",
-  "created_at": "2026-07-15T22:13:22.832072+00:00",
-  "rows": 18508,
+  "version": "20260716T143658Z",
+  "created_at": "2026-07-16T14:36:59.481616+00:00",
+  "rows": 18509,
   "features": [
     "trm_chg_1",
     "trm_pct_1",
@@ -109,10 +109,13 @@
     "pca_ridge",
     "extra_trees",
     "quantile_boosting",
-    "regime_ridge"
+    "regime_ridge",
+    "long_ridge",
+    "recent_extra_trees"
   ],
   "sklearn_version": "1.6.1",
-  "validation_cv": "TimeSeriesSplit(n_splits=5)",
+  "validation_cv": "nested purged time-series search",
+  "training_vintage_policy": "latest_available",
   "availability_lags_applied": true,
   "status": "TRAINED_NOT_YET_GOVERNANCE_APPROVED"
 }

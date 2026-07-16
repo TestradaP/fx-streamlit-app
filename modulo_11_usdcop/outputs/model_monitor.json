@@ -3,12 +3,13 @@
   "outside_training_range": [
     "reserves_level",
     "current_account_release_change",
+    "brent_pct_5",
     "carry_spread_pp",
     "tes_slope_10y_1y_pp",
     "policy_rate_spread_pp"
   ],
   "missing_features": [],
-  "outside_ratio": 0.054945054945054944,
+  "outside_ratio": 0.06593406593406594,
   "severe": false,
-  "generated_at": "2026-07-15T22:18:37.502889+00:00"
+  "generated_at": "2026-07-16T14:46:59.766322+00:00"
 }

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-15T22:12:53.377933+00:00",
+  "generated_at": "2026-07-16T14:35:08.517155+00:00",
   "status": "success",
   "updated": [
     "banrep:trm",
@@ -29,7 +29,7 @@
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 0,
-      "latest_value": 3252.11,
+      "latest_value": 3233.91,
       "messages": []
     },
     {
@@ -48,7 +48,7 @@
       "rows": 4519,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 0,
+      "age_days": 1,
       "latest_value": 11.183,
       "messages": []
     },
@@ -58,7 +58,7 @@
       "rows": 798,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 15,
+      "age_days": 16,
       "latest_value": 66957.39,
       "messages": []
     },
@@ -68,7 +68,7 @@
       "rows": 5722,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 5,
+      "age_days": 6,
       "latest_value": 12.09,
       "messages": []
     },
@@ -78,7 +78,7 @@
       "rows": 5722,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 5,
+      "age_days": 6,
       "latest_value": 11.95,
       "messages": []
     },
@@ -88,7 +88,7 @@
       "rows": 5722,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 5,
+      "age_days": 6,
       "latest_value": 11.84,
       "messages": []
     },
@@ -98,7 +98,7 @@
       "rows": 852,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 15,
+      "age_days": 16,
       "latest_value": 6.14,
       "messages": []
     },
@@ -108,28 +108,28 @@
       "rows": 105,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 106,
+      "age_days": 107,
       "latest_value": -1573.14,
       "messages": []
     },
     {
       "series": "sofr",
       "passed": true,
-      "rows": 2067,
+      "rows": 2068,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 1,
-      "latest_value": 3.63,
+      "latest_value": 3.64,
       "messages": []
     },
     {
       "series": "vix",
       "passed": true,
-      "rows": 9229,
+      "rows": 9230,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 1,
-      "latest_value": 16.5,
+      "latest_value": 15.67,
       "messages": []
     },
     {
@@ -138,7 +138,7 @@
       "rows": 5144,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 5,
+      "age_days": 6,
       "latest_value": 120.5046,
       "messages": []
     },
@@ -148,7 +148,7 @@
       "rows": 9932,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 2,
+      "age_days": 3,
       "latest_value": 81.62,
       "messages": []
     },
@@ -158,7 +158,7 @@
       "rows": 12525,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 1,
+      "age_days": 2,
       "latest_value": 4.18,
       "messages": []
     },
@@ -168,7 +168,7 @@
       "rows": 16117,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 1,
+      "age_days": 2,
       "latest_value": 4.58,
       "messages": []
     },
@@ -178,7 +178,7 @@
       "rows": 2897,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 5,
+      "age_days": 6,
       "latest_value": -0.538,
       "messages": []
     }
