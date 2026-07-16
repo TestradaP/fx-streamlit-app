@@ -22,6 +22,9 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
     started = datetime.now(timezone.utc)
     details: dict[str, Any] = {"updated": [], "failed": [], "quality": []}
 
+    # ---------------------------------------------------------
+    # 1. ACTUALIZACIÓN DE BANREP
+    # ---------------------------------------------------------
     banrep = BanRepClient()
     for item in catalog.get("banrep", []):
         if not item.get("enabled") or item.get("series_id") is None:
@@ -35,23 +38,27 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
                 item.get("expected_min"),
                 item.get("expected_max"),
             )
-            # ... código previo de BanRep ...
             details["quality"].append({"series": item["name"], **quality.__dict__})
             
             if not quality.passed:
                 LOGGER.warning("⚠️ Alerta de calidad de datos para banrep:%s: %s", item["name"], ", ".join(quality.messages))
-                continue  # 👈 ¡CLAVE! Nos saltamos esta serie, NO llamamos a save_series, pero el bucle FOR continúa con la siguiente
+                # Registramos el fallo para el reporte final y las pruebas unitarias
+                details["failed"].append({
+                    "series": f"banrep:{item['name']}",
+                    "error": f"quality check failed: {', '.join(quality.messages)}"
+                })
+                continue  # Evitamos guardar datos corruptos y pasamos a la siguiente serie
             
             repository.save_series(frame, "banrep", item["name"])
             details["updated"].append(f"banrep:{item['name']}")
             
-            # Al quitar el 'raise', la ejecución fluye de forma natural hasta el guardado
-            repository.save_series(frame, "banrep", item["name"])
-            details["updated"].append(f"banrep:{item['name']}")
         except Exception as exc:  # noqa: BLE001 - continue other sources
             LOGGER.exception("BanRep update failed for %s", item["name"])
             details["failed"].append({"series": f"banrep:{item['name']}", "error": str(exc)})
 
+    # ---------------------------------------------------------
+    # 2. ACTUALIZACIÓN DE FRED
+    # ---------------------------------------------------------
     fred = FredClient()
     for item in catalog.get("fred", []):
         if not item.get("enabled"):
@@ -66,14 +73,26 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
                 item.get("expected_max"),
             )
             details["quality"].append({"series": item["name"], **quality.__dict__})
+            
             if not quality.passed:
-                raise ValueError(f"quality check failed: {', '.join(quality.messages)}")
+                LOGGER.warning("⚠️ Alerta de calidad de datos para fred:%s: %s", item["name"], ", ".join(quality.messages))
+                # Registramos el fallo para el reporte final y las pruebas unitarias
+                details["failed"].append({
+                    "series": f"fred:{item['name']}",
+                    "error": f"quality check failed: {', '.join(quality.messages)}"
+                })
+                continue  # Evitamos guardar datos corruptos y pasamos a la siguiente serie
+                
             repository.save_series(frame, "fred", item["name"])
             details["updated"].append(f"fred:{item['name']}")
+            
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("FRED update failed for %s", item["name"])
             details["failed"].append({"series": f"fred:{item['name']}", "error": str(exc)})
 
+    # ---------------------------------------------------------
+    # 3. ACTUALIZACIÓN DE DANE
+    # ---------------------------------------------------------
     try:
         dane_url = catalog.get("dane", {}).get("trade_balance_page")
         summary = DaneTradeClient().fetch_latest_summary(dane_url)
@@ -84,27 +103,35 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
         LOGGER.warning("Optional DANE update failed: %s", exc)
         details["failed"].append({"series": "dane:trade_balance", "error": str(exc)})
 
+    # ---------------------------------------------------------
+    # 4. REPORTE Y ESTADO FINAL
+    # ---------------------------------------------------------
     required_failures = [
         failure
         for failure in details["failed"]
         if not str(failure["series"]).startswith("dane:")
     ]
+    
     if required_failures:
         status = "failure"
     elif details["failed"]:
         status = "partial_success"
     else:
         status = "success"
+        
     repository.record_run(status, details, started_at=started)
+    
     result = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
         **details,
     }
+    
     (paths.output_root / "data_quality_latest.json").write_text(
         json.dumps(result, ensure_ascii=False, default=str, indent=2),
         encoding="utf-8",
     )
+    
     vintage_coverage = repository.vintage_coverage()
     vintage_rows = (
         vintage_coverage.to_dict(orient="records")
@@ -112,6 +139,7 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
         and vintage_coverage.__class__.__module__.startswith("pandas")
         else []
     )
+    
     vintage_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "immutable_ingestion_snapshots",
@@ -122,7 +150,9 @@ def update_all(project_root: str | Path | None = None) -> dict[str, Any]:
         ),
         "series": vintage_rows,
     }
+    
     (paths.output_root / "point_in_time_coverage.json").write_text(
         json.dumps(vintage_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    
     return result
