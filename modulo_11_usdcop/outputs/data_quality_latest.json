@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-16T14:35:08.517155+00:00",
+  "generated_at": "2026-08-13T12:06:10.607274+00:00",
   "status": "success",
   "updated": [
     "banrep:trm",
@@ -29,7 +29,7 @@
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 0,
-      "latest_value": 3233.91,
+      "latest_value": 3123.28,
       "messages": []
     },
     {
@@ -45,61 +45,61 @@
     {
       "series": "ibr_on",
       "passed": true,
-      "rows": 4519,
+      "rows": 4537,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 1,
-      "latest_value": 11.183,
+      "latest_value": 11.179,
       "messages": []
     },
     {
       "series": "reserves",
       "passed": true,
-      "rows": 798,
+      "rows": 799,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 16,
-      "latest_value": 66957.39,
+      "age_days": 13,
+      "latest_value": 67028.07,
       "messages": []
     },
     {
       "series": "tes_cop_1y",
       "passed": true,
-      "rows": 5722,
+      "rows": 5739,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 6,
-      "latest_value": 12.09,
+      "age_days": 7,
+      "latest_value": 12.26,
       "messages": []
     },
     {
       "series": "tes_cop_5y",
       "passed": true,
-      "rows": 5722,
+      "rows": 5739,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 6,
-      "latest_value": 11.95,
+      "age_days": 7,
+      "latest_value": 12.08,
       "messages": []
     },
     {
       "series": "tes_cop_10y",
       "passed": true,
-      "rows": 5722,
+      "rows": 5739,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 6,
-      "latest_value": 11.84,
+      "age_days": 7,
+      "latest_value": 12.02,
       "messages": []
     },
     {
       "series": "inflation",
       "passed": true,
-      "rows": 852,
+      "rows": 853,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 16,
-      "latest_value": 6.14,
+      "age_days": 13,
+      "latest_value": 6.03,
       "messages": []
     },
     {
@@ -108,78 +108,78 @@
       "rows": 105,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 107,
+      "age_days": 135,
       "latest_value": -1573.14,
       "messages": []
     },
     {
       "series": "sofr",
       "passed": true,
-      "rows": 2068,
+      "rows": 2087,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 1,
+      "age_days": 2,
       "latest_value": 3.64,
       "messages": []
     },
     {
       "series": "vix",
       "passed": true,
-      "rows": 9230,
+      "rows": 9249,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 1,
-      "latest_value": 15.67,
+      "age_days": 2,
+      "latest_value": 15.28,
       "messages": []
     },
     {
       "series": "broad_usd",
       "passed": true,
-      "rows": 5144,
+      "rows": 5164,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 6,
-      "latest_value": 120.5046,
+      "latest_value": 119.0649,
       "messages": []
     },
     {
       "series": "brent",
       "passed": true,
-      "rows": 9932,
+      "rows": 9953,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 3,
-      "latest_value": 81.62,
+      "age_days": 2,
+      "latest_value": 93.26,
       "messages": []
     },
     {
       "series": "treasury_2y",
       "passed": true,
-      "rows": 12525,
+      "rows": 12545,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 2,
-      "latest_value": 4.18,
+      "latest_value": 4.22,
       "messages": []
     },
     {
       "series": "treasury_10y",
       "passed": true,
-      "rows": 16117,
+      "rows": 16137,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 2,
-      "latest_value": 4.58,
+      "latest_value": 4.7,
       "messages": []
     },
     {
       "series": "financial_conditions",
       "passed": true,
-      "rows": 2897,
+      "rows": 2901,
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 6,
-      "latest_value": -0.538,
+      "latest_value": -0.549,
       "messages": []
     }
   ]
