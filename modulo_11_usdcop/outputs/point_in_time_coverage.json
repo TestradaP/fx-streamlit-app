@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-13T12:06:10.854323+00:00",
+  "generated_at": "2026-08-18T11:46:38.702797+00:00",
   "mode": "immutable_ingestion_snapshots",
   "historical_vintage_complete": false,
   "note": "Point-in-time coverage begins with the first stored snapshot; older revisions cannot be reconstructed retrospectively.",
@@ -18,12 +18,12 @@
     {
       "source": "banrep",
       "series_id": "ibr_on",
-      "vintage_rows": 4537,
-      "snapshots": 2,
+      "vintage_rows": 4539,
+      "snapshots": 3,
       "first_snapshot": "2026-07-15T22:11:43.282409+00:00",
-      "last_snapshot": "2026-08-13T12:01:41.433491+00:00",
+      "last_snapshot": "2026-08-18T11:43:39.944366+00:00",
       "first_observation": "2008-01-02",
-      "last_observation": "2026-08-12",
+      "last_observation": "2026-08-14",
       "authoritative_release_share": 0.0
     },
     {
@@ -40,12 +40,12 @@
     {
       "source": "banrep",
       "series_id": "policy_rate",
-      "vintage_rows": 10029,
-      "snapshots": 3,
+      "vintage_rows": 10034,
+      "snapshots": 4,
       "first_snapshot": "2026-07-15T22:11:43.093263+00:00",
-      "last_snapshot": "2026-08-13T12:01:41.197971+00:00",
+      "last_snapshot": "2026-08-18T11:43:39.722251+00:00",
       "first_observation": "1999-02-27",
-      "last_observation": "2026-08-13",
+      "last_observation": "2026-08-18",
       "authoritative_release_share": 0.0
     },
     {
@@ -95,12 +95,12 @@
     {
       "source": "banrep",
       "series_id": "trm",
-      "vintage_rows": 10029,
-      "snapshots": 3,
+      "vintage_rows": 10034,
+      "snapshots": 4,
       "first_snapshot": "2026-07-15T22:11:42.725071+00:00",
-      "last_snapshot": "2026-08-13T12:01:40.709202+00:00",
+      "last_snapshot": "2026-08-18T11:43:39.435318+00:00",
       "first_observation": "1999-02-28",
-      "last_observation": "2026-08-13",
+      "last_observation": "2026-08-18",
       "authoritative_release_share": 0.0
     },
     {
@@ -117,13 +117,13 @@
     {
       "source": "fred",
       "series_id": "broad_usd",
-      "vintage_rows": 8878,
-      "snapshots": 3,
+      "vintage_rows": 10760,
+      "snapshots": 4,
       "first_snapshot": "2026-07-15T22:11:57.624919+00:00",
-      "last_snapshot": "2026-08-13T12:02:42.932555+00:00",
+      "last_snapshot": "2026-08-18T11:43:49.152531+00:00",
       "first_observation": "2006-01-02",
-      "last_observation": "2026-08-07",
-      "authoritative_release_share": 0.4205902230232034
+      "last_observation": "2026-08-14",
+      "authoritative_release_share": 0.5219330855018587
     },
     {
       "source": "fred",
@@ -139,45 +139,45 @@
     {
       "source": "fred",
       "series_id": "sofr",
-      "vintage_rows": 5728,
-      "snapshots": 3,
+      "vintage_rows": 7571,
+      "snapshots": 4,
       "first_snapshot": "2026-07-15T22:11:51.106362+00:00",
-      "last_snapshot": "2026-08-13T12:01:55.374855+00:00",
+      "last_snapshot": "2026-08-18T11:43:43.086988+00:00",
       "first_observation": "2018-04-03",
-      "last_observation": "2026-08-11",
-      "authoritative_release_share": 0.6391410614525139
+      "last_observation": "2026-08-14",
+      "authoritative_release_share": 0.7269845462950733
     },
     {
       "source": "fred",
       "series_id": "treasury_10y",
-      "vintage_rows": 16137,
-      "snapshots": 2,
+      "vintage_rows": 16140,
+      "snapshots": 3,
       "first_snapshot": "2026-07-15T22:12:41.887091+00:00",
-      "last_snapshot": "2026-08-13T12:03:26.798029+00:00",
+      "last_snapshot": "2026-08-18T11:43:55.343586+00:00",
       "first_observation": "1962-01-02",
-      "last_observation": "2026-08-11",
+      "last_observation": "2026-08-14",
       "authoritative_release_share": 0.0
     },
     {
       "source": "fred",
       "series_id": "treasury_2y",
-      "vintage_rows": 12545,
-      "snapshots": 2,
+      "vintage_rows": 12548,
+      "snapshots": 3,
       "first_snapshot": "2026-07-15T22:12:41.468071+00:00",
-      "last_snapshot": "2026-08-13T12:03:12.402774+00:00",
+      "last_snapshot": "2026-08-18T11:43:54.191843+00:00",
       "first_observation": "1976-06-01",
-      "last_observation": "2026-08-11",
+      "last_observation": "2026-08-14",
       "authoritative_release_share": 0.0
     },
     {
       "source": "fred",
       "series_id": "vix",
-      "vintage_rows": 9249,
-      "snapshots": 3,
+      "vintage_rows": 9252,
+      "snapshots": 4,
       "first_snapshot": "2026-07-15T22:11:56.500689+00:00",
-      "last_snapshot": "2026-08-13T12:02:25.384177+00:00",
+      "last_snapshot": "2026-08-18T11:43:44.178759+00:00",
       "first_observation": "1990-01-02",
-      "last_observation": "2026-08-11",
+      "last_observation": "2026-08-14",
       "authoritative_release_share": 0.0
     }
   ]
