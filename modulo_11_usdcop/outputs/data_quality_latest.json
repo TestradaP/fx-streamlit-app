@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-18T11:46:38.495642+00:00",
+  "generated_at": "2026-08-19T11:46:54.332764+00:00",
   "status": "success",
   "updated": [
     "banrep:trm",
@@ -29,7 +29,7 @@
       "duplicate_dates": 0,
       "missing_values": 0,
       "age_days": 0,
-      "latest_value": 3128.65,
+      "latest_value": 3098.79,
       "messages": []
     },
     {
@@ -45,11 +45,11 @@
     {
       "series": "ibr_on",
       "passed": true,
-      "rows": 4539,
+      "rows": 4540,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
-      "latest_value": 11.183,
+      "age_days": 1,
+      "latest_value": 11.189,
       "messages": []
     },
     {
@@ -58,38 +58,38 @@
       "rows": 799,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 18,
+      "age_days": 19,
       "latest_value": 67028.07,
       "messages": []
     },
     {
       "series": "tes_cop_1y",
       "passed": true,
-      "rows": 5739,
+      "rows": 5744,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 12,
-      "latest_value": 12.26,
+      "age_days": 5,
+      "latest_value": 12.17,
       "messages": []
     },
     {
       "series": "tes_cop_5y",
       "passed": true,
-      "rows": 5739,
+      "rows": 5744,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 12,
-      "latest_value": 12.08,
+      "age_days": 5,
+      "latest_value": 12.03,
       "messages": []
     },
     {
       "series": "tes_cop_10y",
       "passed": true,
-      "rows": 5739,
+      "rows": 5744,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 12,
-      "latest_value": 12.02,
+      "age_days": 5,
+      "latest_value": 11.98,
       "messages": []
     },
     {
@@ -98,7 +98,7 @@
       "rows": 853,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 18,
+      "age_days": 19,
       "latest_value": 6.03,
       "messages": []
     },
@@ -108,28 +108,28 @@
       "rows": 105,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 140,
+      "age_days": 141,
       "latest_value": -1573.14,
       "messages": []
     },
     {
       "series": "sofr",
       "passed": true,
-      "rows": 2090,
+      "rows": 2091,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
-      "latest_value": 3.62,
+      "age_days": 2,
+      "latest_value": 3.66,
       "messages": []
     },
     {
       "series": "vix",
       "passed": true,
-      "rows": 9252,
+      "rows": 9253,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
-      "latest_value": 14.25,
+      "age_days": 2,
+      "latest_value": 15.19,
       "messages": []
     },
     {
@@ -138,7 +138,7 @@
       "rows": 5169,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
+      "age_days": 5,
       "latest_value": 118.9028,
       "messages": []
     },
@@ -148,28 +148,28 @@
       "rows": 9953,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 7,
+      "age_days": 8,
       "latest_value": 93.26,
       "messages": []
     },
     {
       "series": "treasury_2y",
       "passed": true,
-      "rows": 12548,
+      "rows": 12549,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
-      "latest_value": 4.17,
+      "age_days": 2,
+      "latest_value": 4.19,
       "messages": []
     },
     {
       "series": "treasury_10y",
       "passed": true,
-      "rows": 16140,
+      "rows": 16141,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 4,
-      "latest_value": 4.68,
+      "age_days": 2,
+      "latest_value": 4.72,
       "messages": []
     },
     {
@@ -178,7 +178,7 @@
       "rows": 2901,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 11,
+      "age_days": 12,
       "latest_value": -0.549,
       "messages": []
     }

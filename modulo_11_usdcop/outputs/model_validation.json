@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-18T11:57:25.495860+00:00",
+  "generated_at": "2026-08-19T11:58:53.972278+00:00",
   "design": "purged expanding-window; 125-observation refit blocks",
   "test_rows": 750,
   "purge_calendar_days": 60,
@@ -12,32 +12,32 @@
     {
       "source": "banrep",
       "series_id": "trm",
-      "observations": 10034,
+      "observations": 10035,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:42.725071+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:39.435318+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:31.474155+00:00"
     },
     {
       "source": "banrep",
       "series_id": "policy_rate",
-      "observations": 10034,
+      "observations": 10035,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.093263+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:39.722251+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:31.730017+00:00"
     },
     {
       "source": "banrep",
       "series_id": "ibr_on",
-      "observations": 4539,
+      "observations": 4540,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.282409+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:39.944366+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:31.912644+00:00"
     },
     {
       "source": "banrep",
@@ -52,32 +52,32 @@
     {
       "source": "banrep",
       "series_id": "tes_cop_1y",
-      "observations": 5739,
+      "observations": 5744,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.605278+00:00",
-      "archive_last_retrieval": "2026-08-13T12:01:41.792736+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:32.171155+00:00"
     },
     {
       "source": "banrep",
       "series_id": "tes_cop_5y",
-      "observations": 5739,
+      "observations": 5744,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.792074+00:00",
-      "archive_last_retrieval": "2026-08-13T12:01:41.989674+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:32.309498+00:00"
     },
     {
       "source": "banrep",
       "series_id": "tes_cop_10y",
-      "observations": 5739,
+      "observations": 5744,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.955395+00:00",
-      "archive_last_retrieval": "2026-08-13T12:01:42.224520+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:32.472004+00:00"
     },
     {
       "source": "banrep",
@@ -102,22 +102,22 @@
     {
       "source": "fred",
       "series_id": "sofr",
-      "observations": 2090,
-      "authoritative_release_share": 0.011004784688995215,
-      "initial_release_value_share": 0.011004784688995215,
+      "observations": 2091,
+      "authoritative_release_share": 0.011477761836441894,
+      "initial_release_value_share": 0.011477761836441894,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:51.106362+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:43.086988+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:38.922733+00:00"
     },
     {
       "source": "fred",
       "series_id": "vix",
-      "observations": 9252,
+      "observations": 9253,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:56.500689+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:44.178759+00:00"
+      "archive_last_retrieval": "2026-08-19T11:43:42.827244+00:00"
     },
     {
       "source": "fred",
@@ -142,22 +142,22 @@
     {
       "source": "fred",
       "series_id": "treasury_2y",
-      "observations": 12548,
+      "observations": 12549,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:12:41.468071+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:54.191843+00:00"
+      "archive_last_retrieval": "2026-08-19T11:44:03.834692+00:00"
     },
     {
       "source": "fred",
       "series_id": "treasury_10y",
-      "observations": 16140,
+      "observations": 16141,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:12:41.887091+00:00",
-      "archive_last_retrieval": "2026-08-18T11:43:55.343586+00:00"
+      "archive_last_retrieval": "2026-08-19T11:44:10.029700+00:00"
     },
     {
       "source": "fred",
