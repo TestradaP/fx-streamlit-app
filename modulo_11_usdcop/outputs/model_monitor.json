@@ -4,10 +4,12 @@
     "reserves_level",
     "current_account_release_change",
     "trm_momentum_60",
-    "tes_slope_10y_1y_pp"
+    "carry_spread_pp",
+    "tes_slope_10y_1y_pp",
+    "policy_rate_spread_pp"
   ],
   "missing_features": [],
-  "outside_ratio": 0.04395604395604396,
+  "outside_ratio": 0.06593406593406594,
   "severe": false,
-  "generated_at": "2026-08-20T11:58:11.055532+00:00"
+  "generated_at": "2026-08-20T23:00:58.309293+00:00"
 }

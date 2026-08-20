@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-20T11:58:08.511388+00:00",
+  "generated_at": "2026-08-20T23:00:55.280734+00:00",
   "design": "purged expanding-window; 125-observation refit blocks",
   "test_rows": 750,
   "purge_calendar_days": 60,
@@ -32,12 +32,12 @@
     {
       "source": "banrep",
       "series_id": "ibr_on",
-      "observations": 4541,
+      "observations": 4542,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:43.282409+00:00",
-      "archive_last_retrieval": "2026-08-20T11:45:28.459922+00:00"
+      "archive_last_retrieval": "2026-08-20T22:46:13.842463+00:00"
     },
     {
       "source": "banrep",
@@ -102,22 +102,22 @@
     {
       "source": "fred",
       "series_id": "sofr",
-      "observations": 2092,
-      "authoritative_release_share": 0.011950286806883365,
-      "initial_release_value_share": 0.011950286806883365,
+      "observations": 2093,
+      "authoritative_release_share": 0.012422360248447204,
+      "initial_release_value_share": 0.012422360248447204,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:51.106362+00:00",
-      "archive_last_retrieval": "2026-08-20T11:45:31.684481+00:00"
+      "archive_last_retrieval": "2026-08-20T22:46:15.942612+00:00"
     },
     {
       "source": "fred",
       "series_id": "vix",
-      "observations": 9254,
+      "observations": 9255,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:11:56.500689+00:00",
-      "archive_last_retrieval": "2026-08-20T11:45:32.738123+00:00"
+      "archive_last_retrieval": "2026-08-20T22:46:16.671882+00:00"
     },
     {
       "source": "fred",
@@ -142,22 +142,22 @@
     {
       "source": "fred",
       "series_id": "treasury_2y",
-      "observations": 12550,
+      "observations": 12551,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:12:41.468071+00:00",
-      "archive_last_retrieval": "2026-08-20T11:45:35.525910+00:00"
+      "archive_last_retrieval": "2026-08-20T22:46:24.071824+00:00"
     },
     {
       "source": "fred",
       "series_id": "treasury_10y",
-      "observations": 16142,
+      "observations": 16143,
       "authoritative_release_share": 0.0,
       "initial_release_value_share": 0.0,
       "release_before_retrieval_share": 1.0,
       "archive_first_retrieval": "2026-07-15T22:12:41.887091+00:00",
-      "archive_last_retrieval": "2026-08-20T11:45:36.417292+00:00"
+      "archive_last_retrieval": "2026-08-20T22:46:25.155553+00:00"
     },
     {
       "source": "fred",

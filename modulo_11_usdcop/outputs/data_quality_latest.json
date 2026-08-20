@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-20T11:48:19.238745+00:00",
+  "generated_at": "2026-08-20T22:49:08.317121+00:00",
   "status": "success",
   "updated": [
     "banrep:trm",
@@ -45,11 +45,11 @@
     {
       "series": "ibr_on",
       "passed": true,
-      "rows": 4541,
+      "rows": 4542,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 1,
-      "latest_value": 11.186,
+      "age_days": 0,
+      "latest_value": 11.19,
       "messages": []
     },
     {
@@ -115,21 +115,21 @@
     {
       "series": "sofr",
       "passed": true,
-      "rows": 2092,
+      "rows": 2093,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 2,
-      "latest_value": 3.65,
+      "age_days": 1,
+      "latest_value": 3.62,
       "messages": []
     },
     {
       "series": "vix",
       "passed": true,
-      "rows": 9254,
+      "rows": 9255,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 2,
-      "latest_value": 15.84,
+      "age_days": 1,
+      "latest_value": 14.89,
       "messages": []
     },
     {
@@ -155,21 +155,21 @@
     {
       "series": "treasury_2y",
       "passed": true,
-      "rows": 12550,
+      "rows": 12551,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 2,
+      "age_days": 1,
       "latest_value": 4.19,
       "messages": []
     },
     {
       "series": "treasury_10y",
       "passed": true,
-      "rows": 16142,
+      "rows": 16143,
       "duplicate_dates": 0,
       "missing_values": 0,
-      "age_days": 2,
-      "latest_value": 4.71,
+      "age_days": 1,
+      "latest_value": 4.65,
       "messages": []
     },
     {
